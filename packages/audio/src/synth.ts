@@ -34,6 +34,8 @@ export interface SynthOptions {
   maxVoices: number
   /** share an existing output stage instead of creating one */
   chain?: MasterChain
+  /** connect voices here instead of directly to the chain input (an instrument bus) */
+  output?: AudioNode
 }
 
 export class SynthEngine implements NoteSink {
@@ -59,7 +61,9 @@ export class SynthEngine implements NoteSink {
     this.maxVoices = opts.maxVoices
     this.noiseBuffer = makeNoise(ctx, 2)
     this.chain = opts.chain ?? new MasterChain(ctx)
-    this.voiceBus = this.chain.input
+    this.voiceBus = ctx.createGain()
+    this.voiceBus.gain.value = 1
+    this.voiceBus.connect(opts.output ?? this.chain.input)
     this.setMacros(this.macros)
   }
 

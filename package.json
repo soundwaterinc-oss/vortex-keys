@@ -1,18 +1,22 @@
 {
   "name": "el-systema-instrument-family",
   "version": "0.2.0",
-  "description": "EL-SYSTEMA INSTRUMENT FAMILY — VORTEX KEYS, ORBIT, WAVE FIELD, SWARM sharing one set of natural laws",
+  "description": "EL-SYSTEMA INSTRUMENT FAMILY \u2014 VORTEX KEYS, ORBIT, WAVE FIELD, SWARM sharing one set of natural laws",
   "type": "module",
   "private": true,
-  "workspaces": ["packages/*", "apps/*"],
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "scripts": {
     "dev": "npm run dev -w apps/vortex-keys",
     "dev:orbit": "npm run dev -w apps/orbit",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "build": "npm run typecheck && npm run build -w apps/vortex-keys && npm run build -w apps/orbit && node scripts/assemble-dist.mjs",
+    "build": "npm run typecheck && npm run build -w apps/vortex-keys && npm run build -w apps/orbit && npm run build -w apps/ensemble && node scripts/assemble-dist.mjs",
     "preview": "vite preview --outDir dist --port 4179",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "dev:ensemble": "npm run dev -w apps/ensemble"
   },
   "dependencies": {
     "react": "^18.3.1",

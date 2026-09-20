@@ -35,7 +35,8 @@ subset of the combination space so it keeps a strong identity.
 | instrument | role | interaction surface | status |
 |---|---|---|---|
 | VORTEX KEYS | melody / pitch / expressive playing | spiral keyboard | complete (primary app) |
-| ORBIT | rhythm / pulse / percussion | orbital dial | prototype (proof of shared core) |
+| ORBIT | rhythm / pulse / percussion | orbital dial | playable prototype; hosted in ENSEMBLE |
+| ENSEMBLE | performance workspace: VORTEX → ORBIT causality | both surfaces + routing/mix | first milestone done |
 | WAVE FIELD | harmony / drone / resonance / space | spatial wave field | planned — physics & mapping exist |
 | SWARM | macro structure / emergent organisation | agents / phase view | planned — physics & mapping exist |
 
@@ -81,11 +82,148 @@ Input → Physics model → PhysicsSnapshot + PhysicsEvent[] → MusicalMapper
       → GeneratedEvent[] → quantize/schedule → instrument sound engine → MasterChain → output
 ```
 
+## ENSEMBLE (milestone: first cross-instrument ecosystem)
+
+> One gesture becomes an object; the object enters a law; the law becomes time; time returns as sound.
+
+`/ensemble/` hosts VORTEX KEYS and ORBIT together. Both are the same
+classes the standalone apps run; the only difference is who creates the
+runtime.
+
+### EnsembleHost (`@el-systema/host`)
+
+```
+EnsembleHost
+  audio     one AudioContext (created on the first user gesture)
+  master    MasterChain: instrument buses → master → compressor → limiter → out
+  clock     SourceClock on audio.currentTime, bpm = global.tempo
+  bus       EventBus (namespaced events with metadata)
+  queue     shared MusicalEventQueue (ORBIT schedules through it)
+  global    GlobalState { tempo, masterGain, tuningId, rootFrequency, seed }
+  limits    { maxQueueSize, maxGeneration }
+```
+
+`setTempo / setTuning / setSeed / reset` mutate `global` and publish
+`ensemble.tempoChanged / tuningChanged / seedChanged / reset`; every hosted
+instrument subscribes to the `ensemble.` namespace and follows.
+
+```
+standalone   Instrument.start()      → creates its own EnsembleHost (one instrument inside)
+ensemble     Instrument.start(host)  → receives the shared host
+```
+
+`HostedInstrument { id, start(host), stop(), handleSystemEvent(e), getState(), setState() }`
+is implemented directly by `Instrument` (VORTEX KEYS) and `OrbitEngine`.
+
+### Audio ownership and buses
+
+```
+AudioContext (one)
+ ├─ InstrumentBus "vortex-keys"  ← VORTEX SynthEngine voices     LEVEL · MUTE (20 ms ramps)
+ ├─ InstrumentBus "orbit"        ← ORBIT SynthEngine voices      LEVEL · MUTE
+ └─ MasterChain.input → dry/space → master gain → compressor → limiter → analyser → destination
+```
+
+Each engine is constructed with `{ chain: host.master, output: host.instrumentBus(id).input }`.
+Standalone apps get exactly the same graph with a single bus.
+
+### Shared clock ≠ shared grid
+
+One `MusicalClock` (bpm, origin). VORTEX KEYS defaults to FREE timing in
+the ensemble, ORBIT to HARD 1/16; both read the same `origin` and `bpm`, so
+ORBIT's grid and VORTEX's free events share one time reference. ORBIT's
+orbital speeds are in revolutions per beat, so BPM changes scale its rhythm.
+
+### Cross-instrument event flow
+
+```
+VORTEX KEYS
+      │  vortex.notePlayed { scaleDegree, octave, frequency, velocity, sourceId }   generation 0
+      ↓
+Router (apps/ensemble/src/routing.ts)   rule: VORTEX → ORBIT (ON/OFF, SPAWN %, PITCH FOLLOW, VELOCITY→ENERGY %)
+      │  ensemble.orbitSpawnRequested { scaleDegree, octave, velocity, energy }     generation 1 (deriveEvent)
+      ↓
+ORBIT.spawnFromRequest → OrbitModel.inject(identity, …, { orbitSize, eccentricity, energy, speed })
+      │  orbit.bodySpawned                                                          generation 1 (continueEvent)
+      │  physical trajectory (Kepler solution, mean motion ∝ a^-3/2)
+      │  orbit.gateCrossed · orbit.periapsis · orbit.apoapsis                        generation 1
+      ↓
+Pulse mapping → GeneratedEvent → quantize on the shared clock → MusicalEventQueue
+      │  orbit.noteGenerated { scaleDegree, octave, frequency, velocity, time }     generation 1
+      ↓
+ORBIT SynthEngine (wood) → "orbit" bus → master
+```
+
+ORBIT's physical-to-musical mapping for a routed note:
+
+| from | to |
+|---|---|
+| scale degree, octave | body identity (verbatim, always) |
+| octave | orbit size: higher octave → smaller orbit → faster recurrence (Kepler 3) |
+| energy (from velocity × VELOCITY→ENERGY) | eccentricity +0.35·E (timing asymmetry), speed ×(0.85 + 0.3·E), initial body energy, so lifetime |
+| gate crossing | hit (Pulse mapping `triggerOn`) |
+| periapsis | accent |
+| body energy | hit velocity; radius → brightness |
+
+Limits: MAX bodies (default 12; when full the lowest-energy, then oldest,
+body is evicted deterministically), BODY LIFETIME, ENERGY DECAY, ORBIT
+`maxEventsPerSecond` 16 / per step 4, host `maxQueueSize` 512 (generated
+events are dropped, never the loop), VORTEX particle limits unchanged.
+
+### Event namespace and feedback protection
+
+Every `SystemEvent` carries `meta { origin, generation, eventId, parentEventId? }`.
+
+- `makeEvent`    → generation 0 (a direct performer action or an instrument's own physics)
+- `deriveEvent`  → generation + 1, only used by routing rules; returns `null` above `MAX_EVENT_GENERATION` (2)
+- `continueEvent`→ same generation: a body's later physics/notes belong to the hop that created it
+
+Only explicit routing rules create cross-instrument events. Nothing
+subscribes to `orbit.noteGenerated`, so ORBIT can never feed itself; a
+future `ORBIT → WAVE FIELD → VORTEX` chain would stop at generation 2.
+
+Names: `vortex.notePlayed`, `vortex.noteReleased`, `vortex.gateCrossed`,
+`ensemble.orbitSpawnRequested`, `ensemble.tempoChanged`, `ensemble.tuningChanged`,
+`ensemble.seedChanged`, `ensemble.reset`, `orbit.bodySpawned`, `orbit.gateCrossed`,
+`orbit.periapsis`, `orbit.apoapsis`, `orbit.noteGenerated`.
+
+### Semantic pitch
+
+`MusicalPitchIdentity { scaleDegree, octave }` travels on the bus and lives
+in every body. Hz is produced only by `resolvePitch(identity, { scale, rootHz })`
+at the moment a note is scheduled, so changing the ensemble tuning keeps
+every orbiting body's degree and octave and re-resolves its frequency
+(tested in `apps/ensemble/tests` and the ENSEMBLE smoke).
+
+### Determinism
+
+`globalSeed` → `deriveSeed(seed, 'vortex-keys')`, `deriveSeed(seed, 'orbit')`,
+`deriveSeed(seed, 'routing')`. The router's SPAWN % draws from its own
+stream; ORBIT's spawn jitter is scaled by the CHAOS macro (0 in ENSEMBLE),
+so the same seed + same played note gives the same orbital initial
+conditions (tested).
+
+### Priority
+
+Direct performer notes go straight to the synth with no limits. Generated
+events pass `PhysicsFlow` limits (lowest-energy dropped first), the
+per-second caps, and the host queue cap. Voice stealing takes releasing
+voices first. Manual playing therefore stays responsive under generative load.
+
+### Sound vocabulary
+
+The voice library (`@el-systema/audio/voices.ts`) now contains Glass, Pluck,
+Wood, Breath, Pad, Hammond, Pipe, Voice and Rhodes, plus stacked sound
+layers in VORTEX KEYS. These are intentional and part of the growing shared
+vocabulary; ORBIT curates the percussive subset (Wood, Glass, Pluck, Breath).
+All engines share `MasterChain`, `makeNoise`, `makeImpulse` and the
+`SynthEngine` voice allocator; instruments choose what to excite.
+
 ## Folder / package structure
 
 ```
 packages/
-  core/        math (prng, util, normalize) · tuning · time (clock, quantize, scheduler)
+  core/        math (prng, util, normalize) · tuning (+ semantic pitch) · time (clock, quantize, scheduler)
                state (GlobalState, InstrumentState, deriveSeed) · communication (EventBus)
                instrument (InstrumentDefinition contract)
   physics/     types (PhysicsSnapshot, PhysicsEvent, PhysicsModel, GlobalMacros) · frame
@@ -95,10 +233,12 @@ packages/
   audio/       NoteSink/PitchedNote · dsp (noise, impulse, MasterChain) · voices (shared voice
                library) · SynthEngine (voice management) · midiSink (MPE + OSC bridge stubs)
   shared-ui/   Section/Slider/Select/Toggle/Segmented + base.css (palette, panel/stage/transport layout)
+  host/        EnsembleHost (AudioContext, MasterChain + buses, clock, bus, queue, GlobalState) · HostedInstrument
 apps/
   vortex-keys/ spiral geometry · presets (VORTEX's curated state) · Instrument engine
                flowFactory (mode → physics × mapping) · renderer · Panel/Transport/Monitor
-  orbit/       OrbitEngine · ORBIT-specific mappings (Pulse, Apsides) · dial canvas · panel
+  orbit/       OrbitEngine (hostable) · ORBIT-specific mappings (Pulse, Apsides) · dial canvas · panel
+  ensemble/    Ensemble (host + both instruments) · Router (routing rules) · performance layout · diagnostics
   wave-field/  README only (planned)
   swarm/       README only (planned)
 scripts/       assemble-dist (/, /orbit/) · smoke tests (playwright)
@@ -109,8 +249,9 @@ Dependency direction (no cycles):
 
 ```
 core  ←  physics  ←  mapping  ←  apps
-core  ←  audio               ←  apps
+core  ←  audio    ←  host    ←  apps
 core  ←  shared-ui           ←  apps
+apps/vortex-keys, apps/orbit  ←  apps/ensemble   (instrument apps export their engine + surface)
 ```
 
 `physics` imports only `core`. `mapping` imports `core` + `physics`.
@@ -212,20 +353,19 @@ ORBIT (`apps/orbit`, ~350 lines) is the template.
 ## Technical debt (introduced or kept, deliberately)
 
 - **Stateful physics models.** `PhysicsModel` keeps state inside the instance (`step(dt, now, ctx)` mutates bodies) rather than the pure `step(state, params, dt) → { state, events }` form. Converting five working models was not worth the risk in this pass; the interface is small enough to migrate one model at a time.
-- **Instrument contract not yet implemented** by the two engines; both have the equivalent surface. Formalising it is the first ENSEMBLE step.
+- **Two contracts.** `HostedInstrument` (host package) is what ENSEMBLE uses; the older `InstrumentDefinition` in core remains as the intended long-term shape. They should be merged once WAVE FIELD exists.
 - **Two schedulers.** VORTEX KEYS schedules straight into the `NoteSink` (Web Audio orders by time); ORBIT goes through `MusicalEventQueue`. Both are correct; VORTEX KEYS should adopt the queue when it grows a second sink.
+- **ENSEMBLE imports instrument apps as packages** (`@el-systema/vortex-keys`, `@el-systema/orbit` export engine + canvas). Fine for two instruments; a `packages/instruments-*` split would be cleaner at four.
+- **PLAY/PAUSE suspends the AudioContext** rather than stopping the runners; simple and click-free, but the clock keeps its origin.
 - **Shared voice library lives in `audio/voices.ts`**; instruments choose a subset by convention, not by type.
 - **CSS shared by `@import` of a package file path** (`@el-systema/shared-ui/src/base.css`) rather than a proper style export.
-- **No ENSEMBLE app yet.** Both apps create their own AudioContext, clock and bus.
 
 ## Next recommended refactor
 
-Introduce the ENSEMBLE host in three small moves: (1) wrap `Instrument` and
-`OrbitEngine` in `InstrumentDefinition` adapters that accept an
-`InstrumentHost` instead of creating their own AudioContext/clock/bus;
-(2) one `MasterChain` per host with per-instrument input gains; (3) a
-`apps/ensemble` page that mounts both canvases on one clock and subscribes
-`notePlayed → orbit.launch`. Nothing in the packages needs to change.
+Merge `HostedInstrument` and `InstrumentDefinition` into one contract and
+move the two engines' host-following code (`handleSystemEvent` for
+`ensemble.*`) into a small shared base so a third instrument gets it for
+free. Then let VORTEX KEYS schedule through the host queue like ORBIT.
 
 ## Path to WAVE FIELD
 
@@ -233,7 +373,8 @@ Introduce the ENSEMBLE host in three small moves: (1) wrap `Instrument` and
 - Mapping: a drone mapping (`amplitude → drone intensity`, `slope → brightness`, `probe position → pitch`, `nullCrossing → release`).
 - Audio: a continuous-voice engine (sine/breath/pad drones whose gain follows `field` at each probe rather than note on/off) on the shared `MasterChain`.
 - Interface: the field grid renderer from VORTEX KEYS' wave view becomes the instrument surface; drag = move source, click = add, hold = impulse.
-- Bus: subscribe `orbitHit → impulse(source)`; publish `energyChanged`.
+- Bus: a routing rule `orbit.periapsis → ensemble.waveImpulseRequested` (generation 2 — the last allowed hop from a VORTEX note) and `wave.energyChanged` for VORTEX timbre later.
+- Host: `WaveFieldEngine implements HostedInstrument`, its own `InstrumentBus "wave-field"`, drones on the shared `MasterChain`.
 
 ## Path to SWARM
 

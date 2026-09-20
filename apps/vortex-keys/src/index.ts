@@ -1,0 +1,10 @@
+// VORTEX KEYS as a hostable instrument: engine + interaction surface for ENSEMBLE.
+export { Instrument, INSTRUMENT_ID } from './engine/instrument'
+export type { Snapshot, ActiveNote } from './engine/instrument'
+export { InstrumentContext, useInstrument, useInstrumentState } from './state/useInstrument'
+export { SpiralCanvas } from './ui/SpiralCanvas'
+export { Monitor } from './ui/Monitor'
+export { Panel } from './ui/Panel'
+export { Transport } from './ui/Transport'
+export * from './preset/types'
+export { FACTORY_PRESETS, defaultState, sanitizePreset } from './preset/presets'

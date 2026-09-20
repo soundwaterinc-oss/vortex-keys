@@ -1,9 +1,10 @@
 import { Section, Slider, Select, Segmented } from '@el-systema/shared-ui'
 import { SCALES, QUANTIZE_VALUES, midiToHz, midiToName } from '@el-systema/core'
-import { engine, useOrbitState } from './store'
+import { useOrbit, useOrbitState } from './store'
 import { ORBIT_MAPPINGS } from './mappings'
 
 export function Panel() {
+  const engine = useOrbit()
   const s = useOrbitState()
   const rootMidi = Math.round(69 + 12 * Math.log2(s.rootHz / 440))
   return (

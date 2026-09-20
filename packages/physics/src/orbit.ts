@@ -31,7 +31,23 @@ export interface OrbitParams {
   maxAge: number
   minEnergy: number
   quadrantEvents: boolean
+  /**
+   * Kepler's third law: mean motion ∝ a^(-3/2), so a larger orbit recurs
+   * more slowly. `speed` then applies at a = referenceAxis.
+   */
+  keplerian: boolean
+  referenceAxis: number
+  /** when full: evict the lowest-energy (then oldest) body instead of refusing */
+  evictWhenFull: boolean
   gates: Gate[]
+}
+
+/** Overrides a bridge may pass when a body is spawned from another instrument. */
+export interface OrbitSpawnOptions {
+  orbitSize?: number
+  eccentricity?: number
+  energy?: number
+  speed?: number
 }
 
 export const DEFAULT_ORBIT_PARAMS: OrbitParams = {
@@ -45,6 +61,9 @@ export const DEFAULT_ORBIT_PARAMS: OrbitParams = {
   maxAge: 60,
   minEnergy: 0.05,
   quadrantEvents: false,
+  keplerian: false,
+  referenceAxis: 0.5,
+  evictWhenFull: false,
   gates: [],
 }
 
@@ -96,25 +115,34 @@ export class OrbitModel implements PhysicsModel<OrbitParams> {
     return this.list.filter((b) => b.alive)
   }
 
-  inject(identity: MusicalIdentity, ctx: PhysicsContext, now: number) {
-    if (ctx.amount <= 0) return
-    if (this.list.filter((b) => b.alive).length >= this.params.maxOrbiters) return
+  inject(identity: MusicalIdentity, ctx: PhysicsContext, now: number, opts: OrbitSpawnOptions = {}): OrbitBody | null {
+    if (ctx.amount <= 0) return null
     const p = this.params
+    const alive = this.list.filter((b) => b.alive)
+    if (alive.length >= p.maxOrbiters) {
+      if (!p.evictWhenFull) return null
+      // deterministic policy: lowest energy first, oldest on ties
+      const victim = alive.reduce((v, b) => (b.snapshot.energy < v.snapshot.energy || (b.snapshot.energy === v.snapshot.energy && b.born < v.born) ? b : v), alive[0])
+      victim.alive = false
+    }
     const m = ctx.macros
-    // SPACE scales the orbit, CHAOS jitters eccentricity/size (seeded)
-    const size = clamp(p.orbitSize * (0.5 + m.space) * (1 + ctx.prng.signed() * 0.3 * m.chaos), 0.15, 1)
-    const e = clamp(p.eccentricity + ctx.prng.signed() * 0.3 * m.chaos, 0, 0.95)
+    // SPACE scales the orbit; CHAOS jitters eccentricity/size (seeded)
+    const size = clamp((opts.orbitSize ?? p.orbitSize * (0.5 + m.space)) * (1 + ctx.prng.signed() * 0.3 * m.chaos), 0.15, 1)
+    const e = clamp((opts.eccentricity ?? p.eccentricity) + ctx.prng.signed() * 0.3 * m.chaos, 0, 0.95)
     const a = size / (1 + e)
+    // speed jitter only with CHAOS; keplerian: period grows with size
+    const jitter = 1 + ctx.prng.signed() * 0.3 * m.chaos
+    const kepler = p.keplerian ? Math.pow(a / Math.max(0.05, p.referenceAxis), -1.5) : 1
     const orbit: OrbitState = {
       semiMajorAxis: a,
       eccentricity: e,
       orientation: degreeAngle(identity.degree, ctx.scaleLength),
       phase: 0,
-      orbitalSpeed: p.speed * (0.7 + 0.6 * ctx.prng.next()),
+      orbitalSpeed: clamp((opts.speed ?? p.speed) * kepler * jitter, 0.01, 4),
     }
-    const snap: PhysicsSnapshot = { ...emptySnapshot(), angle: orbit.orientation, radius: a * (1 - e) }
+    const snap: PhysicsSnapshot = { ...emptySnapshot(), angle: orbit.orientation, radius: a * (1 - e), energy: clamp(opts.energy ?? 1, 0.05, 1) }
     snap.position = polarToXY(snap.radius, snap.angle)
-    this.list.push({
+    const body: OrbitBody = {
       id: `o${this.nextId++}`,
       identity: { ...identity },
       snapshot: snap,
@@ -124,7 +152,9 @@ export class OrbitModel implements PhysicsModel<OrbitParams> {
       born: now,
       orbit,
       driftPhase: ctx.prng.next() * TAU,
-    })
+    }
+    this.list.push(body)
+    return body
   }
 
   step(dt: number, now: number, ctx: PhysicsContext): PhysicsEvent[] {

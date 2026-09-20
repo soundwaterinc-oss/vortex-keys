@@ -7,6 +7,7 @@ Architecture, roles and roadmap: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)*
 |---|---|---|---|
 | VORTEX KEYS | melody | complete | https://soundwaterinc-oss.github.io/vortex-keys/ |
 | ORBIT | rhythm | prototype | https://soundwaterinc-oss.github.io/vortex-keys/orbit/ |
+| ENSEMBLE | VORTEX → ORBIT ecosystem | milestone 1 | https://soundwaterinc-oss.github.io/vortex-keys/ensemble/ |
 | WAVE FIELD | harmony | planned | — |
 | SWARM | structure | planned | — |
 
@@ -14,16 +15,18 @@ Architecture, roles and roadmap: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)*
 npm install
 npm run dev          # VORTEX KEYS  (vite, :5173)
 npm run dev:orbit    # ORBIT        (vite, :5174)
+npm run dev:ensemble # ENSEMBLE     (vite, :5175)
 npm test             # vitest across packages/* and apps/*
 npm run build        # typecheck + both apps -> dist/ (/, /orbit/)
 npm run preview      # serve dist on :4179
 node scripts/smoke.mjs        # VORTEX KEYS end-to-end (needs preview)
 node scripts/smoke-orbit.mjs  # VORTEX KEYS -> ORBIT family proof (needs preview)
+node scripts/smoke-ensemble.mjs # ENSEMBLE acceptance scenario (causality, routing, tuning, mute, reset, voices)
 ```
 
 Shared packages: `@el-systema/core` (math, tuning, time, state, bus),
 `@el-systema/physics`, `@el-systema/mapping`, `@el-systema/audio`,
-`@el-systema/shared-ui`. Apps: `apps/vortex-keys`, `apps/orbit`.
+`@el-systema/shared-ui`, `@el-systema/host`. Apps: `apps/vortex-keys`, `apps/orbit`, `apps/ensemble`.
 
 ---
 

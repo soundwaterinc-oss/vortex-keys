@@ -46,8 +46,43 @@ export interface MasterChainOptions {
  *   input ─▶ dry ───────────────────────────────┐
  *   input ─▶ send ─▶ delay(fb, LP) ─▶ convolver ─▶ wet ─┼▶ master ─▶ comp ─▶ limiter ─▶ analyser ─▶ out
  */
+/**
+ * One instrument's gain bus inside the shared chain. LEVEL and MUTE use
+ * short ramps so toggling never clicks; the send to the space bus follows
+ * the bus level so SPACE stays proportional.
+ */
+export class InstrumentBus {
+  readonly input: GainNode
+  private levelValue = 1
+  private muted = false
+  constructor(readonly ctx: AudioContext, readonly name: string, chain: MasterChain) {
+    this.input = ctx.createGain()
+    this.input.gain.value = 1
+    this.input.connect(chain.input)
+  }
+  get level() {
+    return this.levelValue
+  }
+  get isMuted() {
+    return this.muted
+  }
+  setLevel(v: number) {
+    this.levelValue = safeParam(v, 0, 1.5, 1)
+    this.apply()
+  }
+  setMuted(m: boolean) {
+    this.muted = m
+    this.apply()
+  }
+  private apply() {
+    const target = this.muted ? 0 : this.levelValue
+    this.input.gain.setTargetAtTime(target, this.ctx.currentTime, 0.02)
+  }
+}
+
 export class MasterChain {
   readonly input: GainNode
+  readonly buses = new Map<string, InstrumentBus>()
   readonly send: GainNode
   readonly wet: GainNode
   readonly master: GainNode
@@ -108,6 +143,13 @@ export class MasterChain {
     const t = this.ctx.currentTime
     this.send.gain.setTargetAtTime(safeParam(space * 0.9, 0, 1, 0.3), t, 0.05)
     this.wet.gain.setTargetAtTime(safeParam(0.2 + space * 0.8, 0, 1.2, 0.5), t, 0.05)
+  }
+
+  /** Create (or fetch) a named instrument bus feeding this chain. */
+  createBus(name: string): InstrumentBus {
+    let b = this.buses.get(name)
+    if (!b) this.buses.set(name, (b = new InstrumentBus(this.ctx, name, this)))
+    return b
   }
 
   setMasterGain(g: number) {

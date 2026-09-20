@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { instrument, useInstrumentState } from '../state/useInstrument'
+import { useInstrument, useInstrumentState } from '../state/useInstrument'
 import type { Snapshot } from '../engine/instrument'
 
 const Bar = ({ label, v, max = 1, fmt }: { label: string; v: number; max?: number; fmt?: (v: number) => string }) => {
@@ -21,6 +21,7 @@ const Bar = ({ label, v, max = 1, fmt }: { label: string; v: number; max?: numbe
  * Polled at 15 Hz (not per frame) to keep React out of the render loop.
  */
 export function Monitor() {
+  const instrument = useInstrument()
   const s = useInstrumentState()
   const [snap, setSnap] = useState<Snapshot | null>(null)
   useEffect(() => {

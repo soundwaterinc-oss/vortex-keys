@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { keplerPosition, type OrbitBody, GATE_ACTION_LABEL } from '@el-systema/physics'
 import { angleToDegree, TAU } from './shared'
-import { engine } from './store'
+import { useOrbit } from './store'
 import { getScale } from '@el-systema/core'
 
 /**
@@ -11,6 +11,7 @@ import { getScale } from '@el-systema/core'
  * degree lives). Everything drawn comes from the engine snapshot.
  */
 export function OrbitCanvas() {
+  const engine = useOrbit()
   const ref = useRef<HTMLCanvasElement>(null)
   useEffect(() => {
     const canvas = ref.current!
@@ -97,6 +98,20 @@ export function OrbitCanvas() {
         ctx.beginPath()
         ctx.arc(x, y, 3 + 3 * b.snapshot.energy, 0, TAU)
         ctx.fill()
+      }
+      // spawns: a ring converging on the new body — the note arriving from elsewhere
+      for (const sp of s.spawns) {
+        const b = (s.bodies as OrbitBody[]).find((x) => x.id === sp.bodyId)
+        if (!b) continue
+        const age = s.now - sp.time
+        if (age < 0 || age > 0.8) continue
+        const k = age / 0.8
+        const x = cx + Math.cos(b.snapshot.angle) * b.snapshot.radius * R
+        const y = cy + Math.sin(b.snapshot.angle) * b.snapshot.radius * R
+        ctx.strokeStyle = `rgba(180,210,255,${(1 - k) * 0.8})`
+        ctx.beginPath()
+        ctx.arc(x, y, 3 + 40 * (1 - k), 0, TAU)
+        ctx.stroke()
       }
       // hits: expanding rings at the gate the body crossed
       for (const h of s.hits) {

@@ -1,4 +1,4 @@
-import { instrument, useInstrumentState } from '../state/useInstrument'
+import { useInstrument, useInstrumentState } from '../state/useInstrument'
 import { Section, Slider, Select, Segmented } from '@el-systema/shared-ui'
 import { SCALES, getScale } from '@el-systema/core'
 import { midiToHz, midiToName } from '@el-systema/core'
@@ -26,6 +26,7 @@ const RATIO_PRESETS: { name: string; ratios: number[] }[] = [
 ]
 
 export function Panel() {
+  const instrument = useInstrument()
   const s = useInstrumentState()
   const scale = getScale(s.tuning.scaleId)
   const f = s.flow

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { instrument, useInstrumentState } from '../state/useInstrument'
+import { useInstrument, useInstrumentState } from '../state/useInstrument'
 import { fitLayout, hitTest, spiralNodes, type SpiralNode } from '../spiral/spiral'
 import { getScale } from '@el-systema/core'
 import { render } from '../visual/renderer'
@@ -9,6 +9,7 @@ import { render } from '../visual/renderer'
  * the RAF loop only renders the Instrument snapshot.
  */
 export function SpiralCanvas() {
+  const instrument = useInstrument()
   const state = useInstrumentState()
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const hoverRef = useRef<SpiralNode | null>(null)

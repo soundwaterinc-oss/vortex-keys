@@ -374,6 +374,7 @@ export function sanitizePreset(raw: unknown): Preset {
         maxOrbiters: [1, 32],
         maxAge: [1, 600],
         minEnergy: [0.001, 0.5],
+        referenceAxis: [0.05, 1],
       }),
       wave: sanitizeParams(f.wave, base.flow.wave, {
         sourceCount: [1, 6],

@@ -1,9 +1,10 @@
 import { useRef } from 'react'
-import { instrument, useInstrumentState } from '../state/useInstrument'
+import { useInstrument, useInstrumentState } from '../state/useInstrument'
 import { Toggle } from '@el-systema/shared-ui'
 
 /** Performance controls: always visible above the spiral. */
 export function Transport() {
+  const instrument = useInstrument()
   const s = useInstrumentState()
   const fileRef = useRef<HTMLInputElement>(null)
 

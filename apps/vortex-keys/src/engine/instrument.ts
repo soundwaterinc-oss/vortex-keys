@@ -7,8 +7,9 @@ import type { FlowContext, FlowModel, GeneratedEvent } from '@el-systema/mapping
 import { ManualModel, PhysicsFlow, type FlowStats, type MonitorSample } from '@el-systema/mapping'
 import type { PhysicsBody, PhysicsEvent } from '@el-systema/physics'
 import { createPrng, type Prng, quantizeTime, clamp, deriveSeed } from '@el-systema/core'
-import { SourceClock, FixedStepRunner, EventBus, makeEvent, type MusicalClock } from '@el-systema/core'
+import { SourceClock, FixedStepRunner, EventBus, makeEvent, type MusicalClock, type SystemEvent } from '@el-systema/core'
 import { SynthEngine, MultiSink, type NoteSink, type PitchedNote } from '@el-systema/audio'
+import { EnsembleHost, type HostedInstrument } from '@el-systema/host'
 import { createFlow, pushFlowParams } from './flowFactory'
 
 export const INSTRUMENT_ID = 'vortex-keys'
@@ -50,7 +51,8 @@ const TICK_MS = 25
  * React only reads state via `subscribe`/`getState` and calls the action
  * methods; all musical decisions live here or in core/.
  */
-export class Instrument {
+export class Instrument implements HostedInstrument<InstrumentState> {
+  readonly id = INSTRUMENT_ID
   private state: InstrumentState = defaultState()
   private listeners = new Set<Listener>()
   private ctx: AudioContext | null = null
@@ -63,7 +65,11 @@ export class Instrument {
   clock: MusicalClock & { bpm: number } = new SourceClock(() => 0, 84)
   private runner: FixedStepRunner | null = null
   /** internal communication: other instruments / bridges subscribe here */
-  readonly bus: EventBus
+  bus: EventBus
+  /** the runtime this instrument lives in (own in standalone, shared in ENSEMBLE) */
+  host: EnsembleHost | null = null
+  private ownsHost = false
+  private unsubs: (() => void)[] = []
   private active = new Map<string, ActiveNote>()
   private held = new Set<number>()
   private sustained = new Set<number>()
@@ -109,7 +115,8 @@ export class Instrument {
       if (prev.flow.mode !== next.flow.mode || prev.flow.seed !== next.flow.seed) this.rebuildFlow()
       else this.pushFlowParams()
     }
-    if (prev.time.bpm !== next.time.bpm) this.clock.bpm = next.time.bpm
+    if (prev.time.bpm !== next.time.bpm && this.ownsHost) this.host?.setTempo(next.time.bpm)
+    else if (prev.time.bpm !== next.time.bpm && !this.host) this.clock.bpm = next.time.bpm
     if (prev.perf.frozen !== next.perf.frozen) this.flow.setFrozen(next.perf.frozen)
     if (prev.perf.sustain && !next.perf.sustain) this.releaseSustained()
     if (prev.perf.latch && !next.perf.latch) this.releaseLatched()
@@ -137,22 +144,72 @@ export class Instrument {
     return this.ctx !== null
   }
 
-  /** Must be called from a user gesture. */
-  async start() {
+  /**
+   * Must be called from a user gesture. Standalone: creates its own
+   * EnsembleHost. ENSEMBLE: receives the shared one (same AudioContext,
+   * clock, bus and master chain as every other instrument).
+   */
+  async start(host?: EnsembleHost) {
     if (!this.ctx) {
-      this.ctx = new AudioContext({ latencyHint: 'interactive' })
-      this.synth = new SynthEngine(this.ctx, this.state.sound.macros, { maxVoices: 40 })
+      const s = this.state
+      if (host) {
+        this.host = host
+        this.ownsHost = false
+        this.bus = host.bus
+        // follow the host's global state from the start
+        this.state = {
+          ...s,
+          time: { ...s.time, bpm: host.global.tempo },
+          tuning: { ...s.tuning, scaleId: host.global.tuningId, rootHz: host.global.rootFrequency, rootMidi: hzToMidi(host.global.rootFrequency) },
+          flow: { ...s.flow, seed: host.global.seed },
+        }
+        this.rebuildFlow()
+      } else {
+        this.host = EnsembleHost.create({ tempo: s.time.bpm, tuningId: s.tuning.scaleId, rootFrequency: s.tuning.rootHz, seed: s.flow.seed }, this.bus)
+        this.ownsHost = true
+      }
+      const h = this.host
+      this.ctx = h.audio
+      this.synth = new SynthEngine(this.ctx, this.state.sound.macros, { maxVoices: 24, chain: h.master, output: h.instrumentBus(INSTRUMENT_ID).input })
       this.synth.setLayers(this.state.sound.layers)
       this.sink = new MultiSink([this.synth])
-      const ctx = this.ctx
-      this.clock = new SourceClock(() => ctx.currentTime, this.state.time.bpm)
+      this.clock = h.clock
       this.runner = new FixedStepRunner(this.clock, (dt, t) => this.step(dt, t))
       this.timer = window.setInterval(() => this.tick(), TICK_MS)
       document.addEventListener('visibilitychange', this.onVisibility)
+      this.unsubs.push(h.bus.onNamespace('ensemble.', (e) => this.handleSystemEvent(e)))
     }
-    if (this.ctx.state !== 'running') await this.ctx.resume()
+    await this.host!.resume()
     // new state object so React subscribers re-render (audioReady changed)
     this.setState({})
+  }
+
+  /** ENSEMBLE-level changes arrive as events; the instrument follows them. */
+  handleSystemEvent(e: SystemEvent) {
+    switch (e.type) {
+      case 'ensemble.tempoChanged': {
+        const bpm = (e.payload as { bpm: number }).bpm
+        this.setState((s) => ({ time: { ...s.time, bpm } }))
+        break
+      }
+      case 'ensemble.tuningChanged': {
+        const p = e.payload as { tuningId: string; rootFrequency: number }
+        this.setState((s) => ({ tuning: { ...s.tuning, scaleId: p.tuningId, rootHz: p.rootFrequency, rootMidi: hzToMidi(p.rootFrequency) } }))
+        break
+      }
+      case 'ensemble.seedChanged': {
+        const seed = (e.payload as { seed: number }).seed
+        this.setState((s) => ({ flow: { ...s.flow, seed } }))
+        break
+      }
+      case 'ensemble.reset':
+        this.clearFlow()
+        break
+    }
+  }
+
+  stop() {
+    this.dispose()
   }
 
   /** Stop the scheduler and close audio (e.g. on unmount). */
@@ -161,7 +218,10 @@ export class Instrument {
     this.timer = null
     document.removeEventListener('visibilitychange', this.onVisibility)
     this.panic()
-    this.ctx?.close()
+    for (const u of this.unsubs) u()
+    this.unsubs = []
+    if (this.ownsHost) this.host?.dispose()
+    this.host = null
     this.ctx = null
     this.synth = null
   }
@@ -227,7 +287,15 @@ export class Instrument {
     this.held.add(index)
     this.active.set(id, { id, index, note, velocity, start: t, end: Infinity, generated: false })
     this.flow.inject({ ...note, velocity, time: this.simTime }, this.flowContext())
-    this.bus.emit(makeEvent(INSTRUMENT_ID, 'notePlayed', t, { index, note, velocity, frequencyHz: noteToFrequency(this.scale(), s.tuning.rootHz, note) }))
+    this.bus.emit(
+      makeEvent(INSTRUMENT_ID, 'vortex.notePlayed', t, {
+        scaleDegree: note.degree,
+        octave: note.octave,
+        frequency: noteToFrequency(this.scale(), s.tuning.rootHz, note),
+        velocity,
+        sourceId: id,
+      }),
+    )
   }
 
   noteOff(index: number) {
@@ -240,7 +308,7 @@ export class Instrument {
     }
     this.sink.noteOff(`k${index}`, this.ctx.currentTime)
     this.active.delete(`k${index}`)
-    this.bus.emit(makeEvent(INSTRUMENT_ID, 'noteReleased', this.ctx.currentTime, { index }))
+    this.bus.emit(makeEvent(INSTRUMENT_ID, 'vortex.noteReleased', this.ctx.currentTime, { sourceId: `k${index}`, index }))
   }
 
   private releaseSustained() {
@@ -322,7 +390,7 @@ export class Instrument {
 
   /** Semantic physics events go out on the bus so other instruments can react. */
   private publishPhysicsEvent(e: PhysicsEvent) {
-    const type = e.type === 'gateCrossing' ? 'gateCrossed' : e.type === 'sync' ? 'syncChanged' : e.type === 'extrema' ? 'wavePeak' : e.type
+    const type = e.type === 'gateCrossing' ? 'vortex.gateCrossed' : e.type === 'sync' ? 'vortex.syncChanged' : `vortex.${e.type}`
     this.bus.emit(makeEvent(INSTRUMENT_ID, type, e.time, { bodyId: e.bodyId, snapshot: e.current, direction: e.direction, gate: e.gate?.action }))
   }
 
@@ -391,4 +459,8 @@ export class Instrument {
       running: this.ctx?.state === 'running',
     }
   }
+}
+
+function hzToMidi(hz: number): number {
+  return Math.round(69 + 12 * Math.log2(Math.max(1, hz) / 440))
 }
