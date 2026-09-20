@@ -5,7 +5,7 @@ const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
 const errors = []
 page.on('pageerror', (e) => errors.push(String(e)))
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()) })
-await page.goto('http://localhost:4179/')
+await page.goto(process.env.SMOKE_URL ?? 'http://localhost:4179/')
 await page.waitForTimeout(400)
 await page.click('button.start')
 await page.waitForTimeout(300)
