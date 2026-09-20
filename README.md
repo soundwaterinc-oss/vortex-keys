@@ -2,9 +2,9 @@
 
 An experimental browser instrument in which **pitch, tuning, geometry, physical
 motion and rhythm are one system**. You play notes on a spiral keyboard; each
-note can become a particle in a vortex; the particle's trajectory through
-trigger gates generates further notes. A second generative model derives
-rhythm from interfering waves. It is playable first, generative second: at
+note can enter a physical model (gravity vortex, Kepler orbit, wave field,
+coupled oscillators, logistic chaos) whose motion, through a configurable
+musical mapping, generates further notes. It is playable first, generative second: at
 FLOW 0% it is a microtonal spiral synthesizer, at 100% a single touch can
 develop into an autonomous pattern.
 
