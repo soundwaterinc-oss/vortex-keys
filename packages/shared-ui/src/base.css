@@ -1,0 +1,77 @@
+/* EL-SYSTEMA shared UI base: palette, type, and the few common controls. Instruments add their own surfaces. */
+:root {
+  --bg: #07080a;
+  --panel: #0c0e12;
+  --line: rgba(255, 255, 255, 0.08);
+  --fg: #d8dbe2;
+  --dim: rgba(255, 255, 255, 0.45);
+  --acc: #8dbcff;
+  --hot: #ffc878;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--fg);
+  background: var(--bg);
+}
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+body { overflow: hidden; }
+
+.sec { border-top: 1px solid var(--line); padding: 8px 0; }
+.sec h2 { font-size: 10px; letter-spacing: 0.3em; color: var(--dim); margin: 0 0 6px; font-weight: 500; }
+.hint { color: var(--dim); font-size: 10px; line-height: 1.4; margin: 0 0 6px; }
+
+.row { display: grid; grid-template-columns: 54px 1fr 74px; align-items: center; gap: 6px; margin: 3px 0; }
+.row .lbl { color: var(--dim); letter-spacing: 0.1em; }
+.row .val { text-align: right; color: var(--fg); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; }
+.row.big { grid-template-columns: 54px 1fr 44px; margin: 8px 0; }
+.row.big .lbl { color: var(--hot); font-weight: 600; }
+.row.big input[type=range]::-webkit-slider-thumb { background: var(--hot); width: 14px; height: 14px; }
+
+input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 2px; background: rgba(255,255,255,0.18); outline: none; margin: 0; }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 10px; height: 10px; border-radius: 50%; background: var(--acc); cursor: ew-resize; }
+input[type=range]::-moz-range-thumb { width: 10px; height: 10px; border-radius: 50%; background: var(--acc); border: 0; }
+
+select, input.seed {
+  width: 100%; background: #111318; color: var(--fg); border: 1px solid var(--line);
+  font: inherit; padding: 3px 4px; border-radius: 2px;
+}
+.row select { grid-column: 2 / 4; }
+.row input.seed { grid-column: 2 / 4; }
+
+.seg { display: flex; gap: 2px; margin: 4px 0; }
+.seg button, .btns button, .transport button, .tgl {
+  flex: 1; background: #111318; color: var(--dim); border: 1px solid var(--line);
+  font: inherit; letter-spacing: 0.1em; padding: 5px 2px; cursor: pointer; border-radius: 2px;
+}
+.seg button.on { color: #000; background: var(--acc); border-color: var(--acc); }
+.tgl.on { color: #000; background: var(--acc); border-color: var(--acc); }
+.tgl.hot.on { background: var(--hot); border-color: var(--hot); }
+.btns { display: flex; gap: 4px; margin: 4px 0; }
+.btns button:disabled { opacity: 0.35; cursor: default; }
+.btns button:hover:not(:disabled), .transport button:hover, .seg button:hover, .tgl:hover { color: var(--fg); }
+
+.adv { width: 100%; background: none; border: 0; color: var(--dim); font: inherit; text-align: left; padding: 4px 0; cursor: pointer; letter-spacing: 0.1em; }
+.adv:hover { color: var(--fg); }
+
+/* shared layout primitives: side panel + stage + top transport */
+.app { display: grid; grid-template-columns: 290px 1fr; height: 100%; }
+.panel { background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; padding: 10px 12px 30px; user-select: none; }
+.panel::-webkit-scrollbar { width: 6px; }
+.panel::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 3px; }
+.stage { position: relative; min-width: 0; }
+.brand h1 { font-size: 13px; letter-spacing: 0.3em; margin: 4px 0 0; font-weight: 500; }
+.brand .sub { color: var(--dim); letter-spacing: 0.2em; margin-bottom: 8px; }
+.brand .family { display: flex; gap: 8px; margin: 0 0 8px; font-size: 10px; letter-spacing: 0.15em; }
+.brand .family a { color: var(--dim); text-decoration: none; }
+.brand .family a.here { color: var(--acc); }
+.brand .family a:hover { color: var(--fg); }
+.start { width: 100%; padding: 8px; margin: 4px 0 8px; background: var(--acc); color: #000; border: 0; font: inherit; letter-spacing: 0.15em; cursor: pointer; }
+.transport { position: absolute; top: 10px; left: 12px; right: 12px; z-index: 2; display: flex; gap: 4px; pointer-events: none; }
+.transport > * { pointer-events: auto; }
+.transport button, .transport .tgl { flex: 0 0 auto; padding: 5px 12px; background: rgba(12,14,18,0.85); }
+.transport .gap { width: 12px; }
+
+@media (max-width: 900px) {
+  .app { grid-template-columns: 240px 1fr; }
+  .row { grid-template-columns: 46px 1fr 60px; }
+}

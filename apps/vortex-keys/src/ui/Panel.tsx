@@ -46,6 +46,10 @@ export function Panel() {
       <header className="brand">
         <h1>VORTEX KEYS</h1>
         <div className="sub">spiral resonator</div>
+        <nav className="family">
+          <a className="here" href="./">VORTEX KEYS</a>
+          <a href="./orbit/">ORBIT</a>
+        </nav>
         {!instrument.audioReady && (
           <button className="start" onClick={() => instrument.start()}>
             ▶ start audio

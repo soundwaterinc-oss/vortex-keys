@@ -50,6 +50,8 @@ export class PhysicsFlow implements FlowModel {
   lastSample: MonitorSample | null = null
   /** recent semantic events (for visual flashes) */
   recent: PhysicsEvent[] = []
+  /** optional tap: every semantic physics event, before limits (for an event bus) */
+  onPhysicsEvent: ((e: PhysicsEvent) => void) | null = null
 
   constructor(
     public physics: PhysicsModel,
@@ -96,7 +98,10 @@ export class PhysicsFlow implements FlowModel {
     this.window = this.window.filter((t) => t >= cut)
     this.physWindow = this.physWindow.filter((t) => t >= cut)
     this.dropWindow = this.dropWindow.filter((t) => t >= cut)
-    for (const e of events) this.physWindow.push(e.time)
+    for (const e of events) {
+      this.physWindow.push(e.time)
+      this.onPhysicsEvent?.(e)
+    }
     if (events.length) {
       this.recent.push(...events)
       if (this.recent.length > 64) this.recent.splice(0, this.recent.length - 64)

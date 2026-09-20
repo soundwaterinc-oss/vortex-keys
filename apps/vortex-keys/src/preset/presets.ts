@@ -7,7 +7,7 @@ import { DEFAULT_CHAOS_PARAMS } from '@el-systema/physics'
 import { DEFAULT_MACROS_GLOBAL } from '@el-systema/physics'
 import { DEFAULT_LIMITS } from '@el-systema/mapping'
 import { defaultGates, GATE_ACTIONS, type Gate } from '@el-systema/physics'
-import { DEFAULT_MACROS } from '@el-systema/audio'
+import { DEFAULT_MACROS, MODEL_IDS } from '@el-systema/audio'
 import { MAPPING_PRESETS } from '@el-systema/mapping'
 import { midiToHz } from '@el-systema/core'
 import { clamp, finite } from '@el-systema/core'
@@ -324,7 +324,7 @@ export function sanitizePreset(raw: unknown): Preset {
       octaves: Math.round(num(r.tuning?.octaves, 1, 6, base.tuning.octaves)),
     },
     sound: {
-      model: (['glass', 'pluck', 'wood', 'breath', 'pad'] as const).includes(r.sound?.model as never)
+      model: MODEL_IDS.includes(r.sound?.model as never)
         ? (r.sound!.model as Preset['sound']['model'])
         : base.sound.model,
       macros: sanitizeParams(r.sound?.macros, base.sound.macros, { body: [0, 1], air: [0, 1], color: [0, 1], decay: [0, 1], space: [0, 1], motion: [0, 1] }),

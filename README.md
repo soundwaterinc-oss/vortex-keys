@@ -1,3 +1,32 @@
+# EL-SYSTEMA INSTRUMENT FAMILY
+
+One ecosystem, several instruments, one shared set of natural laws.
+Architecture, roles and roadmap: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
+
+| app | role | status | URL |
+|---|---|---|---|
+| VORTEX KEYS | melody | complete | https://soundwaterinc-oss.github.io/vortex-keys/ |
+| ORBIT | rhythm | prototype | https://soundwaterinc-oss.github.io/vortex-keys/orbit/ |
+| WAVE FIELD | harmony | planned | — |
+| SWARM | structure | planned | — |
+
+```
+npm install
+npm run dev          # VORTEX KEYS  (vite, :5173)
+npm run dev:orbit    # ORBIT        (vite, :5174)
+npm test             # vitest across packages/* and apps/*
+npm run build        # typecheck + both apps -> dist/ (/, /orbit/)
+npm run preview      # serve dist on :4179
+node scripts/smoke.mjs        # VORTEX KEYS end-to-end (needs preview)
+node scripts/smoke-orbit.mjs  # VORTEX KEYS -> ORBIT family proof (needs preview)
+```
+
+Shared packages: `@el-systema/core` (math, tuning, time, state, bus),
+`@el-systema/physics`, `@el-systema/mapping`, `@el-systema/audio`,
+`@el-systema/shared-ui`. Apps: `apps/vortex-keys`, `apps/orbit`.
+
+---
+
 # VORTEX KEYS / Spiral Resonator
 
 An experimental browser instrument in which **pitch, tuning, geometry, physical
@@ -26,64 +55,23 @@ node), play.
 
 ## Architecture
 
-```
-Performer input  ─▶  PhysicsModel.step()  ─▶  PhysicsEvent[] (semantic)  ─▶  MusicalMapper
-                     (bodies, snapshots)       gate / phase / threshold /       pitch · velocity ·
-                                               periapsis / extrema / sync …     timbre · trigger
-                                                                                     │
-Synth ◀─ Scheduler (quantize, lookahead) ◀─ GeneratedEvent[] ◀─ PhysicsFlow (limits) ◀┘
-```
-
-A physics model never calls the synth and never knows what a scale is. It
-updates bodies, each carrying a `PhysicsSnapshot` (r, θ, ω, dr/dt, |a|,
-energy, phase, curvature, value, slope, age) and a `MusicalIdentity`
-(degree/octave/velocity from the performer), and emits `PhysicsEvent`s. The
-`MusicalMapper` turns one event + snapshot into pitch, velocity, timbre and
-a trigger decision. `PhysicsFlow` glues them, enforces rate limits and keeps
-the monitor sample. Physics presets (mode + params) and mapping presets are
-independent fields of the state, so *Kepler Orbit + Gravity Bass* or
-*Chaos + Spiral Melody* are just two dropdowns.
+VORTEX KEYS is now `apps/vortex-keys` on top of the shared packages. The
+layer diagram and package layout are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md);
+what is VORTEX-specific:
 
 ```
-src/
-  core/
-    physics/
-      types.ts        PhysicsSnapshot, PhysicsEvent, PhysicsBody, PhysicsModel, GlobalMacros
-      normalize.ts    normalize / mapRange / clamp01 / curve / applyCurve (linear, exp, invExp, scurve)
-      frame.ts        shared angular frame: degree axis ↔ angle
-      gravity.ts      Gravity Vortex           (mode 'vortex')
-      orbit.ts        Kepler-like orbits       (mode 'orbit')
-      wavefield.ts    spatial interference     (mode 'wave')
-      coupled.ts      Kuramoto oscillators     (mode 'coupled')
-      chaos.ts        logistic map             (mode 'chaos')
-    mapping/
-      types.ts        MappingConfig, MappingContext, MusicalMapper, Pitch/TimbreInstruction
-      mapper.ts       ConfigurableMapper — the one mapper, driven by MappingConfig
-      presets.ts      mapping presets (Spiral Melody, Gravity Bass, Spectral Orbit, Swarm Pulse, …)
-    flow/
-      types.ts        FlowModel (what the Instrument steps), GeneratedEvent
-      physicsFlow.ts  PhysicsModel + MusicalMapper → FlowModel, event-rate limits, monitor sample
-      gates.ts        Gate, applyGate (scale-degree transposition)
-      manual.ts       no generation
-    tuning/ spiral/ clock/ preset/ math/     (cents, spiral geometry, quantize, presets, PRNG)
-  audio/    sink.ts (NoteSink/PitchedNote), synth.ts, models.ts, midiSink.ts
-  engine/instrument.ts   state, model construction, fixed-step scheduler, sinks
-  visual/renderer.ts     one visual identity per model, drawn from the snapshot only
-  ui/                    Panel (left), Transport (top), Monitor (physics monitor), SpiralCanvas
-tests/                   vitest: tuning, spiral, prng, quantize, presets, physics, mapping, midi
-scripts/smoke.mjs        playwright: plays every model, cross-maps, mode-switches, screenshots
+apps/vortex-keys/src/
+  spiral/spiral.ts        spiral geometry, fitLayout, hitTest
+  preset/                 VORTEX KEYS' state shape, factory presets, sanitizer
+  engine/flowFactory.ts   mode -> physics model x mapping (curated combination table)
+  engine/instrument.ts    state, shared clock/runner, sinks, EventBus publishing
+  visual/renderer.ts      spiral + one visual identity per physics model
+  ui/                     Panel, Transport, Monitor, SpiralCanvas
 ```
 
 ## How to run
 
-```
-npm install
-npm run dev        # Vite dev server
-npm test           # vitest (pure logic)
-npm run build      # tsc --noEmit + vite build -> dist/
-npm run preview    # serve dist on :4173
-node scripts/smoke.mjs   # headless Chromium: click nodes, switch modes, screenshot (needs preview on :4179)
-```
+See the family commands at the top. VORTEX KEYS alone: `npm run dev`.
 
 Modern desktop Chrome/Edge/Firefox/Safari. AudioContext is created only on
 the first click.

@@ -4,21 +4,14 @@ import { getScale } from '@el-systema/core'
 import { indexToNote, noteToCents, noteToFrequency, noteToIndex, wrapDegree } from '@el-systema/core'
 import type { Scale, ScaleNote } from '@el-systema/core'
 import type { FlowContext, FlowModel, GeneratedEvent } from '@el-systema/mapping'
-import { ManualModel } from '@el-systema/mapping'
-import { PhysicsFlow, type FlowStats, type MonitorSample } from '@el-systema/mapping'
-import { GravityModel } from '@el-systema/physics'
-import { OrbitModel } from '@el-systema/physics'
-import { WaveFieldModel } from '@el-systema/physics'
-import { CoupledModel } from '@el-systema/physics'
-import { ChaosModel } from '@el-systema/physics'
-import type { PhysicsBody, PhysicsEvent, PhysicsModel } from '@el-systema/physics'
-import { ConfigurableMapper } from '@el-systema/mapping'
-import { getMapping } from '@el-systema/mapping'
-import { createPrng, type Prng } from '@el-systema/core'
-import { quantizeTime } from '@el-systema/core'
-import { SynthEngine } from '@el-systema/audio'
-import { MultiSink, type NoteSink, type PitchedNote } from '@el-systema/audio'
-import { clamp } from '@el-systema/core'
+import { ManualModel, PhysicsFlow, type FlowStats, type MonitorSample } from '@el-systema/mapping'
+import type { PhysicsBody, PhysicsEvent } from '@el-systema/physics'
+import { createPrng, type Prng, quantizeTime, clamp, deriveSeed } from '@el-systema/core'
+import { SourceClock, FixedStepRunner, EventBus, makeEvent, type MusicalClock } from '@el-systema/core'
+import { SynthEngine, MultiSink, type NoteSink, type PitchedNote } from '@el-systema/audio'
+import { createFlow, pushFlowParams } from './flowFactory'
+
+export const INSTRUMENT_ID = 'vortex-keys'
 
 /** Visual-facing record of a note currently sounding. */
 export interface ActiveNote {
@@ -50,8 +43,6 @@ export interface Snapshot {
 
 type Listener = () => void
 
-const SIM_DT = 1 / 120 // fixed simulation step (s)
-const LOOKAHEAD = 0.12 // how far ahead of the audio clock we simulate (s)
 const TICK_MS = 25
 
 /**
@@ -67,17 +58,25 @@ export class Instrument {
   private sink: MultiSink = new MultiSink([])
   private flow: FlowModel = new ManualModel()
   private prng: Prng = createPrng(1234)
-  private simTime = 0
   private timer: number | null = null
+  /** shared-family clock (audio-driven once started) and fixed-step runner */
+  clock: MusicalClock & { bpm: number } = new SourceClock(() => 0, 84)
+  private runner: FixedStepRunner | null = null
+  /** internal communication: other instruments / bridges subscribe here */
+  readonly bus: EventBus
   private active = new Map<string, ActiveNote>()
   private held = new Set<number>()
   private sustained = new Set<number>()
   private latched = new Set<number>()
-  private clockOrigin = 0
   private genCounter = 0
 
-  constructor() {
+  constructor(bus: EventBus = new EventBus()) {
+    this.bus = bus
     this.rebuildFlow()
+  }
+
+  private get simTime() {
+    return this.runner ? this.runner.simTime : this.clock.nowSeconds()
   }
 
   // ---------- state ----------
@@ -110,6 +109,7 @@ export class Instrument {
       if (prev.flow.mode !== next.flow.mode || prev.flow.seed !== next.flow.seed) this.rebuildFlow()
       else this.pushFlowParams()
     }
+    if (prev.time.bpm !== next.time.bpm) this.clock.bpm = next.time.bpm
     if (prev.perf.frozen !== next.perf.frozen) this.flow.setFrozen(next.perf.frozen)
     if (prev.perf.sustain && !next.perf.sustain) this.releaseSustained()
     if (prev.perf.latch && !next.perf.latch) this.releaseLatched()
@@ -144,8 +144,9 @@ export class Instrument {
       this.synth = new SynthEngine(this.ctx, this.state.sound.macros, { maxVoices: 24 })
       this.synth.setModel(this.state.sound.model)
       this.sink = new MultiSink([this.synth])
-      this.simTime = this.ctx.currentTime
-      this.clockOrigin = this.ctx.currentTime
+      const ctx = this.ctx
+      this.clock = new SourceClock(() => ctx.currentTime, this.state.time.bpm)
+      this.runner = new FixedStepRunner(this.clock, (dt, t) => this.step(dt, t))
       this.timer = window.setInterval(() => this.tick(), TICK_MS)
       document.addEventListener('visibilitychange', this.onVisibility)
     }
@@ -173,7 +174,7 @@ export class Instrument {
   private onVisibility = () => {
     // when hidden, browsers throttle timers; audio keeps running but we let
     // the simulation catch up in larger chunks (capped) rather than burst.
-    if (!document.hidden && this.ctx) this.simTime = Math.max(this.simTime, this.ctx.currentTime - 0.25)
+    if (!document.hidden) this.runner?.resync()
   }
 
   // ---------- pitch resolution ----------
@@ -226,6 +227,7 @@ export class Instrument {
     this.held.add(index)
     this.active.set(id, { id, index, note, velocity, start: t, end: Infinity, generated: false })
     this.flow.inject({ ...note, velocity, time: this.simTime }, this.flowContext())
+    this.bus.emit(makeEvent(INSTRUMENT_ID, 'notePlayed', t, { index, note, velocity, frequencyHz: noteToFrequency(this.scale(), s.tuning.rootHz, note) }))
   }
 
   noteOff(index: number) {
@@ -238,6 +240,7 @@ export class Instrument {
     }
     this.sink.noteOff(`k${index}`, this.ctx.currentTime)
     this.active.delete(`k${index}`)
+    this.bus.emit(makeEvent(INSTRUMENT_ID, 'noteReleased', this.ctx.currentTime, { index }))
   }
 
   private releaseSustained() {
@@ -305,51 +308,22 @@ export class Instrument {
    */
   private rebuildFlow() {
     const f = this.state.flow
-    this.prng = createPrng(f.seed)
+    // instrument-specific stream derived from the (global) seed
+    this.prng = createPrng(deriveSeed(f.seed, INSTRUMENT_ID))
     this.flow.clear()
-    let physics: PhysicsModel | null = null
-    switch (f.mode) {
-      case 'vortex':
-        physics = new GravityModel({ ...f.vortex, gates: f.gates })
-        break
-      case 'orbit':
-        physics = new OrbitModel({ ...f.orbit, gates: f.gates })
-        break
-      case 'wave':
-        physics = new WaveFieldModel({ ...f.wave, ratios: [...f.wave.ratios] })
-        break
-      case 'coupled':
-        physics = new CoupledModel({ ...f.coupled })
-        break
-      case 'chaos':
-        physics = new ChaosModel({ ...f.chaos })
-        break
-    }
-    if (physics) {
-      const pf = new PhysicsFlow(physics, new ConfigurableMapper(getMapping(f.mappingId)), { ...f.macros }, { ...f.limits })
-      pf.octaves = this.state.tuning.octaves
-      this.flow = pf
-    } else {
-      this.flow = new ManualModel()
-    }
-    this.flow.setFrozen(this.state.perf.frozen)
+    this.flow = createFlow(f, this.state.tuning.octaves, this.state.perf.frozen)
+    if (this.flow instanceof PhysicsFlow) this.flow.onPhysicsEvent = (e) => this.publishPhysicsEvent(e)
   }
 
   /** Push parameter edits into the live model without resetting its state. */
   private pushFlowParams() {
-    const f = this.state.flow
-    if (!(this.flow instanceof PhysicsFlow)) return
-    const pf = this.flow
-    pf.macros = { ...f.macros }
-    pf.limits = { ...f.limits }
-    pf.octaves = this.state.tuning.octaves
-    if (pf.mapper.config.id !== f.mappingId) pf.mapper = new ConfigurableMapper(getMapping(f.mappingId))
-    const ph = pf.physics
-    if (ph instanceof GravityModel) Object.assign(ph.params, f.vortex, { gates: f.gates })
-    else if (ph instanceof OrbitModel) Object.assign(ph.params, f.orbit, { gates: f.gates })
-    else if (ph instanceof WaveFieldModel) Object.assign(ph.params, f.wave, { ratios: [...f.wave.ratios] })
-    else if (ph instanceof CoupledModel) Object.assign(ph.params, f.coupled)
-    else if (ph instanceof ChaosModel) Object.assign(ph.params, f.chaos)
+    pushFlowParams(this.flow, this.state.flow, this.state.tuning.octaves)
+  }
+
+  /** Semantic physics events go out on the bus so other instruments can react. */
+  private publishPhysicsEvent(e: PhysicsEvent) {
+    const type = e.type === 'gateCrossing' ? 'gateCrossed' : e.type === 'sync' ? 'syncChanged' : e.type === 'extrema' ? 'wavePeak' : e.type
+    this.bus.emit(makeEvent(INSTRUMENT_ID, type, e.time, { bodyId: e.bodyId, snapshot: e.current, direction: e.direction, gate: e.gate?.action }))
   }
 
   /** Re-initialise the model's internal state deterministically (coupled phases, chaos x0). */
@@ -359,27 +333,23 @@ export class Instrument {
 
   // ---------- scheduler ----------
   private tick() {
-    if (!this.ctx || !this.synth) return
-    const target = this.ctx.currentTime + LOOKAHEAD
-    // if we fell far behind (tab hidden), skip rather than burst events
-    if (target - this.simTime > 1) this.simTime = target - LOOKAHEAD
-    const ctx = this.flowContext()
-    let guard = 0
-    while (this.simTime < target && guard++ < 400) {
-      const events = this.flow.update(SIM_DT, this.simTime, ctx)
-      for (const e of events) this.scheduleEvent(e)
-      this.simTime += SIM_DT
-    }
-    // drop finished visual records
+    if (!this.ctx || !this.runner) return
+    this.runner.tick()
     const now = this.ctx.currentTime
     for (const [id, a] of this.active) if (a.end < now - 0.05) this.active.delete(id)
+  }
+
+  /** One fixed simulation step: advance the flow and schedule what it generated. */
+  private step(dt: number, simTime: number) {
+    const events = this.flow.update(dt, simTime, this.flowContext())
+    for (const e of events) this.scheduleEvent(e)
   }
 
   private scheduleEvent(e: GeneratedEvent) {
     if (!this.ctx) return
     const s = this.state
     if (s.flow.amount <= 0) return
-    const t = quantizeTime(e.time, s.time.mode, s.time.quantize, s.time.bpm, this.clockOrigin)
+    const t = quantizeTime(e.time, s.time.mode, s.time.quantize, s.time.bpm, this.clock.origin)
     const n = this.scale().cents.length
     // keep generated notes inside the visible spiral: fold octaves
     const w = wrapDegree(e.note.degree, e.note.octave, n)

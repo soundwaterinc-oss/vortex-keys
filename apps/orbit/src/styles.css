@@ -1,0 +1,4 @@
+@import "@el-systema/shared-ui/src/base.css";
+
+/* ORBIT specific surface */
+.dial { width: 100%; height: 100%; display: block; touch-action: none; cursor: crosshair; }

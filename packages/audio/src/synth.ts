@@ -160,22 +160,58 @@ export class SynthEngine implements NoteSink {
       const ngv = safeParam(p.noiseGain, 0, 1, 0.1)
       ng.gain.setValueAtTime(ngv, t)
       // percussive models: noise is only the transient
-      if (p.sustain < 0.5) ng.gain.setTargetAtTime(0, t + 0.005, 0.04 + p.decay * 0.05)
+      if (p.noiseDecay !== undefined) ng.gain.setTargetAtTime(0, t + 0.003, Math.max(0.004, p.noiseDecay))
+      else if (p.sustain < 0.5) ng.gain.setTargetAtTime(0, t + 0.005, 0.04 + p.decay * 0.05)
       noise.connect(nf).connect(ng).connect(filter)
       sources.push(noise)
       nodes.push(nf, ng)
     }
 
+    // additive partials (drawbars / ranks): steady, no auto-fade
+    for (const d of p.additive ?? []) {
+      if (d.gain <= 0) continue
+      const o = ctx.createOscillator()
+      o.type = d.type ?? 'sine'
+      o.frequency.setValueAtTime(safeParam(f * d.ratio, 16, 18000, f), t)
+      if (d.detuneCents) o.detune.value = d.detuneCents
+      const g = ctx.createGain()
+      g.gain.value = safeParam(d.gain, 0, 1, 0.2)
+      o.connect(g).connect(filter)
+      sources.push(o)
+      nodes.push(g)
+    }
+
+    // formant bank: filter -> parallel band-passes -> amp
+    let ampIn: AudioNode = filter
+    if (p.formants && p.formants.length > 0) {
+      const sum = ctx.createGain()
+      sum.gain.value = 1
+      for (const fm of p.formants) {
+        const bp = ctx.createBiquadFilter()
+        bp.type = 'bandpass'
+        bp.frequency.value = safeParam(fm.hz, 60, 8000, 800)
+        bp.Q.value = safeParam(fm.q, 0.5, 30, 8)
+        const g = ctx.createGain()
+        g.gain.value = safeParam(fm.gain, 0, 2, 0.5)
+        filter.connect(bp).connect(g).connect(sum)
+        nodes.push(bp, g)
+      }
+      ampIn = sum
+      nodes.push(sum)
+    }
+
     // LFO
-    if (p.lfoPitchCents > 0 || p.lfoFilterHz > 0 || p.lfoPan > 0) {
+    if (p.lfoPitchCents > 0 || p.lfoFilterHz > 0 || p.lfoPan > 0 || (p.lfoAmp ?? 0) > 0) {
       const lfo = ctx.createOscillator()
       lfo.type = 'sine'
       lfo.frequency.value = safeParam(p.lfoHz, 0.01, 20, 1)
       if (p.lfoPitchCents > 0) {
         const g = ctx.createGain()
         g.gain.value = p.lfoPitchCents
-        lfo.connect(g).connect(car.detune)
+        // vibrato on every pitched oscillator so additive ranks stay locked
+        for (const s of sources) if (s instanceof OscillatorNode) g.connect(s.detune)
         nodes.push(g)
+        lfo.connect(g)
       }
       if (p.lfoFilterHz > 0) {
         const g = ctx.createGain()
@@ -189,10 +225,22 @@ export class SynthEngine implements NoteSink {
         lfo.connect(g).connect(pan.pan)
         nodes.push(g)
       }
+      if ((p.lfoAmp ?? 0) > 0) {
+        // tremolo: gain node sits at 1 - depth/2 and the LFO swings it ±depth/2
+        const depth = safeParam(p.lfoAmp!, 0, 1, 0) * 0.5
+        const trem = ctx.createGain()
+        trem.gain.value = 1 - depth
+        const g = ctx.createGain()
+        g.gain.value = depth
+        lfo.connect(g).connect(trem.gain)
+        ampIn.connect(trem)
+        ampIn = trem
+        nodes.push(g, trem)
+      }
       sources.push(lfo)
     }
 
-    filter.connect(amp).connect(pan).connect(this.voiceBus)
+    ampIn.connect(amp).connect(pan).connect(this.voiceBus)
     nodes.push(filter, amp, pan)
 
     // amplitude envelope: velocity to level is a gentle curve so soft

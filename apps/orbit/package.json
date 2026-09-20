@@ -1,0 +1,20 @@
+{
+  "name": "@el-systema/orbit",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 5174",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@el-systema/audio": "*",
+    "@el-systema/core": "*",
+    "@el-systema/mapping": "*",
+    "@el-systema/physics": "*",
+    "@el-systema/shared-ui": "*",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}
