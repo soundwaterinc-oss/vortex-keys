@@ -1,0 +1,20 @@
+{
+  "name": "@el-systema/vortex-keys",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@el-systema/audio": "*",
+    "@el-systema/core": "*",
+    "@el-systema/mapping": "*",
+    "@el-systema/physics": "*",
+    "@el-systema/shared-ui": "*",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}

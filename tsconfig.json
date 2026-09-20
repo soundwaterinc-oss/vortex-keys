@@ -1,18 +1,4 @@
 {
-  "compilerOptions": {
-    "target": "ES2020",
-    "lib": ["ES2021", "DOM", "DOM.Iterable"],
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
-    "jsx": "react-jsx",
-    "strict": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": false,
-    "noFallthroughCasesInSwitch": true,
-    "skipLibCheck": true,
-    "isolatedModules": true,
-    "resolveJsonModule": true,
-    "types": ["vite/client"]
-  },
-  "include": ["src", "tests"]
+  "extends": "./tsconfig.base.json",
+  "include": ["packages/*/src", "packages/*/tests", "apps/*/src", "apps/*/tests"]
 }
