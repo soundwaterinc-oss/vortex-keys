@@ -7,7 +7,7 @@ import { DEFAULT_CHAOS_PARAMS } from '@el-systema/physics'
 import { DEFAULT_MACROS_GLOBAL } from '@el-systema/physics'
 import { DEFAULT_LIMITS } from '@el-systema/mapping'
 import { defaultGates, GATE_ACTIONS, type Gate } from '@el-systema/physics'
-import { DEFAULT_MACROS, MODEL_IDS } from '@el-systema/audio'
+import { DEFAULT_MACROS, MODEL_IDS, type SoundModelId } from '@el-systema/audio'
 import { MAPPING_PRESETS } from '@el-systema/mapping'
 import { midiToHz } from '@el-systema/core'
 import { clamp, finite } from '@el-systema/core'
@@ -22,7 +22,7 @@ export function defaultPreset(): Preset {
     version: 2,
     name: 'Init',
     tuning: { scaleId: 'penta-major', rootMidi: 48, rootHz: midiToHz(48), octaves: 4 },
-    sound: { model: 'glass', macros: { ...DEFAULT_MACROS } },
+    sound: { model: 'glass', layers: ['glass'], macros: { ...DEFAULT_MACROS } },
     flow: {
       mode: 'vortex',
       amount: 0.6,
@@ -49,7 +49,20 @@ function make(name: string, edit: (p: Preset) => void): Preset {
   const p = defaultPreset()
   p.name = name
   edit(p)
+  p.sound.layers = [p.sound.model]
   return p
+}
+
+export const MAX_SOUND_LAYERS = 4
+
+/** ordered, de-duplicated, capped; the selected model is always the last layer */
+export function normalizeLayers(layers: unknown, model: SoundModelId): SoundModelId[] {
+  const seen: SoundModelId[] = []
+  for (const l of Array.isArray(layers) ? layers : []) {
+    if (MODEL_IDS.includes(l as never) && l !== model && !seen.includes(l as SoundModelId)) seen.push(l as SoundModelId)
+  }
+  seen.push(model)
+  return seen.slice(-MAX_SOUND_LAYERS)
 }
 
 const PHI = (1 + Math.sqrt(5)) / 2
@@ -327,6 +340,7 @@ export function sanitizePreset(raw: unknown): Preset {
       model: MODEL_IDS.includes(r.sound?.model as never)
         ? (r.sound!.model as Preset['sound']['model'])
         : base.sound.model,
+      layers: [],
       macros: sanitizeParams(r.sound?.macros, base.sound.macros, { body: [0, 1], air: [0, 1], color: [0, 1], decay: [0, 1], space: [0, 1], motion: [0, 1] }),
     },
     flow: {
@@ -413,6 +427,7 @@ export function sanitizePreset(raw: unknown): Preset {
       quantize: (['1/4', '1/8', '1/16', '1/8T', '1/16T'] as const).includes(r.time?.quantize as never) ? r.time!.quantize : base.time.quantize,
     },
   }
+  p.sound.layers = normalizeLayers(r.sound?.layers, p.sound.model)
   p.flow.wave.expanding = p.flow.wave.expanding < 0 ? -1 : 1
   if (!p.flow.wave.ratios.length) p.flow.wave.ratios = [...base.flow.wave.ratios]
   return p

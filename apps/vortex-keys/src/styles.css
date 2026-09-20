@@ -22,3 +22,12 @@
 .mon-v.wide { grid-column: 2 / 4; text-align: left; }
 .mon-v.hot { color: var(--hot); }
 .mon-sep { border-top: 1px solid var(--line); margin: 6px 0; }
+
+/* sound layer chips */
+.row.layers { align-items: flex-start; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; flex: 1; }
+.chip { font: inherit; font-size: 10px; padding: 2px 7px; border: 1px solid var(--line, #333); border-radius: 10px; background: transparent; color: var(--dim, #999); cursor: pointer; }
+.chip.on { color: #000; background: var(--acc); border-color: var(--acc); }
+.chip:disabled { cursor: default; opacity: 0.6; }
+.chip:hover:not(:disabled) { color: var(--fg); border-color: var(--fg); }
+.chip.on:hover:not(:disabled) { color: #000; }

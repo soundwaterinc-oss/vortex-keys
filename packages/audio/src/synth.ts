@@ -1,5 +1,5 @@
 import type { NoteSink, PitchedNote } from './sink'
-import { MODELS, type Macros, type SoundModelId } from './voices'
+import { MODELS, type Macros, type SoundModel, type SoundModelId } from './voices'
 import { safeParam } from '@el-systema/core'
 import { makeNoise, MasterChain } from './dsp'
 
@@ -38,6 +38,11 @@ export interface SynthOptions {
 
 export class SynthEngine implements NoteSink {
   readonly ctx: AudioContext
+  /**
+   * Sound layers: every note sounds once through each model here, so
+   * switching timbres stacks rather than replaces. `modelId` is the newest.
+   */
+  layers: SoundModelId[] = ['glass']
   modelId: SoundModelId = 'glass'
   macros: Macros
   private voices = new Map<string, Voice>()
@@ -58,8 +63,16 @@ export class SynthEngine implements NoteSink {
     this.setMacros(this.macros)
   }
 
+  /** single model (replaces all layers) */
   setModel(id: SoundModelId) {
-    this.modelId = id
+    this.setLayers([id])
+  }
+
+  /** stack of models; the last one is the "current" model. Empty falls back to glass. */
+  setLayers(ids: SoundModelId[]) {
+    const list = ids.filter((id) => id in MODELS)
+    this.layers = list.length ? list : ['glass']
+    this.modelId = this.layers[this.layers.length - 1]
   }
 
   setMacros(m: Macros) {
@@ -78,13 +91,19 @@ export class SynthEngine implements NoteSink {
   }
 
   noteOn(n: PitchedNote, time: number): void {
+    const t = Math.max(time, this.ctx.currentTime)
+    // one voice per layer; the same note id retriggered releases every layer
+    this.noteOff(n.id, t)
+    // loudness is shared across the stack so adding a layer doesn't clip
+    const scale = 1 / Math.sqrt(this.layers.length)
+    this.layers.forEach((id, k) => this.startVoice(MODELS[id], `${n.id}#${k}`, n, t, scale))
+  }
+
+  private startVoice(model: SoundModel, key: string, n: PitchedNote, t: number, scale: number): void {
     const ctx = this.ctx
-    const t = Math.max(time, ctx.currentTime)
     const f = safeParam(n.frequencyHz, 16, 16000, 440)
-    if (this.voices.has(n.id)) this.noteOff(n.id, t)
     while (this.voices.size >= this.maxVoices) this.steal(t)
 
-    const model = MODELS[this.modelId]
     const vel = safeParam(n.velocity, 0, 1, 0.5)
     const bright = safeParam(n.brightness ?? 0.5, 0, 1, 0.5)
     const p = model.voice(this.macros, f, vel, bright)
@@ -245,7 +264,7 @@ export class SynthEngine implements NoteSink {
 
     // amplitude envelope: velocity to level is a gentle curve so soft
     // generated notes stay audible; peak is conservative (< 0.5 per voice)
-    const peak = safeParam(p.level * (0.25 + 0.75 * Math.pow(vel, 1.4)), 0, 0.6, 0.2)
+    const peak = safeParam(p.level * scale * (0.25 + 0.75 * Math.pow(vel, 1.4)), 0, 0.6, 0.2)
     const atk = Math.max(0.002, p.attack)
     amp.gain.linearRampToValueAtTime(peak, t + atk)
     const sus = peak * p.sustain
@@ -254,9 +273,9 @@ export class SynthEngine implements NoteSink {
 
     for (const s of sources) s.start(t)
 
-    const v: Voice = { id: n.id, startTime: t, nodes, sources, amp, release: p.release, releasing: false, peak }
-    this.voices.set(n.id, v)
-    this.order.push(n.id)
+    const v: Voice = { id: key, startTime: t, nodes, sources, amp, release: p.release, releasing: false, peak }
+    this.voices.set(key, v)
+    this.order.push(key)
     // a voice leaves the pool only when its last source has actually ended,
     // so releasing tails still count toward polyphony (and can be stolen)
     const last = sources[sources.length - 1]
@@ -271,10 +290,9 @@ export class SynthEngine implements NoteSink {
   }
 
   noteOff(id: string, time: number): void {
-    const v = this.voices.get(id)
-    if (!v) return
     const t = Math.max(time, this.ctx.currentTime)
-    this.release(v, t, v.release)
+    const prefix = `${id}#`
+    for (const v of this.voices.values()) if (v.id.startsWith(prefix)) this.release(v, t, v.release)
   }
 
   allNotesOff(time?: number): void {

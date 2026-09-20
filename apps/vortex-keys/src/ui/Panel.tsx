@@ -5,7 +5,7 @@ import { midiToHz, midiToName } from '@el-systema/core'
 import { MODELS, MODEL_IDS, type Macros } from '@el-systema/audio'
 import { GATE_ACTIONS, GATE_ACTION_LABEL, defaultGates, type GateAction } from '@el-systema/physics'
 import { QUANTIZE_VALUES } from '@el-systema/core'
-import { FACTORY_PRESETS } from '../preset/presets'
+import { FACTORY_PRESETS, normalizeLayers } from '../preset/presets'
 import { MAPPING_PRESETS, getMapping } from '@el-systema/mapping'
 import type { FlowMode, FlowSettings } from '../preset/types'
 
@@ -82,7 +82,35 @@ export function Panel() {
       </Section>
 
       <Section title="SOUND">
-        <Select label="model" value={s.sound.model} options={MODEL_IDS.map((id) => ({ value: id, label: MODELS[id].name }))} onChange={(model) => instrument.setState((st) => ({ sound: { ...st.sound, model } }))} />
+        <Select
+          label="model"
+          value={s.sound.model}
+          options={MODEL_IDS.map((id) => ({ value: id, label: MODELS[id].name }))}
+          onChange={(model) => instrument.setState((st) => ({ sound: { ...st.sound, model, layers: normalizeLayers(st.sound.layers, model) } }))}
+        />
+        {/* selected models stack: earlier layers keep sounding; × removes one */}
+        <div className="row layers">
+          <span className="lbl">layers</span>
+          <div className="chips">
+            {s.sound.layers.map((id) => (
+              <button
+                key={id}
+                className={'chip' + (id === s.sound.model ? ' on' : '')}
+                disabled={s.sound.layers.length <= 1}
+                title={s.sound.layers.length > 1 ? 'remove layer' : undefined}
+                onClick={() =>
+                  instrument.setState((st) => {
+                    const layers = st.sound.layers.filter((l) => l !== id)
+                    if (!layers.length) return {}
+                    return { sound: { ...st.sound, layers, model: layers[layers.length - 1] } }
+                  })
+                }
+              >
+                {MODELS[id].name.split(' / ')[0]} ×
+              </button>
+            ))}
+          </div>
+        </div>
         {(['body', 'air', 'color', 'decay', 'space', 'motion'] as const).map((k) => (
           <Slider key={k} label={k.toUpperCase()} value={s.sound.macros[k]} format={pct} onChange={(v) => setMacro(k, v)} />
         ))}

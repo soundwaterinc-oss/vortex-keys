@@ -102,7 +102,7 @@ export class Instrument {
 
   private applyStateDiff(prev: InstrumentState, next: InstrumentState) {
     if (prev.sound !== next.sound && this.synth) {
-      this.synth.setModel(next.sound.model)
+      this.synth.setLayers(next.sound.layers)
       this.synth.setMacros(next.sound.macros)
     }
     if (prev.flow !== next.flow) {
@@ -141,8 +141,8 @@ export class Instrument {
   async start() {
     if (!this.ctx) {
       this.ctx = new AudioContext({ latencyHint: 'interactive' })
-      this.synth = new SynthEngine(this.ctx, this.state.sound.macros, { maxVoices: 24 })
-      this.synth.setModel(this.state.sound.model)
+      this.synth = new SynthEngine(this.ctx, this.state.sound.macros, { maxVoices: 40 })
+      this.synth.setLayers(this.state.sound.layers)
       this.sink = new MultiSink([this.synth])
       const ctx = this.ctx
       this.clock = new SourceClock(() => ctx.currentTime, this.state.time.bpm)

@@ -20,7 +20,10 @@ export interface TuningSettings {
 }
 
 export interface SoundSettings {
+  /** newest / currently selected model */
   model: SoundModelId
+  /** models sounding at once; selecting a model adds it here (max 4) */
+  layers: SoundModelId[]
   macros: Macros
 }
 
