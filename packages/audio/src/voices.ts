@@ -23,10 +23,15 @@ export interface Macros {
 
 export const DEFAULT_MACROS: Macros = { body: 0.5, air: 0.2, color: 0.4, decay: 0.5, space: 0.35, motion: 0.2 }
 
-export interface AdditivePartial {
-  ratio: number
-  gain: number
-  type?: OscillatorType
+/**
+ * Harmonic table rendered as ONE PeriodicWave oscillator (cheap additive).
+ * amps[k] is the amplitude of harmonic k+1 of a fundamental at f*baseRatio;
+ * baseRatio 0.5 lets a table hold a sub-octave (16') and 5⅓' style quints.
+ * detuneCents > 0 adds a second, detuned copy for ensemble chorus.
+ */
+export interface HarmonicSpec {
+  baseRatio: number
+  amps: number[]
   detuneCents?: number
 }
 
@@ -62,7 +67,7 @@ export interface VoiceParams {
    * extra steady oscillators summed into the filter (drawbars / pipe ranks).
    * ratio is relative to the fundamental; detuneCents gives ensemble chorus.
    */
-  additive?: AdditivePartial[]
+  harmonics?: HarmonicSpec
   /** parallel band-pass bank after the filter (vowel formants) */
   formants?: { hz: number; q: number; gain: number }[]
   /**
@@ -83,6 +88,21 @@ export interface SoundModel {
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t
 /** keep partials/filters below Nyquist-ish so high notes stay clean */
 const cap = (hz: number) => Math.min(hz, 18000)
+
+/**
+ * Build a harmonic amplitude table from (harmonic, gain) pairs, dropping
+ * anything that would land above ~17 kHz for this note. Gains are quantized
+ * so the synth can cache one PeriodicWave per distinct table.
+ */
+function drawbars(f: number, pairs: [number, number][]): number[] {
+  const amps: number[] = []
+  for (const [h, g] of pairs) {
+    if (f * 0.5 * h >= 17000 || g <= 0) continue
+    amps[h - 1] = Math.round(g * 32) / 32
+  }
+  for (let i = 0; i < amps.length; i++) amps[i] ??= 0
+  return amps
+}
 
 /** vowel formant table (F1 F2 F3, Hz), ordered for a continuous u→o→a→e→i sweep */
 const VOWELS: [number, number, number][] = [
@@ -272,16 +292,19 @@ export const MODELS: Record<SoundModelId, SoundModel> = {
         lfoPan: m.motion * 0.25,
         lfoAmp: m.motion * 0.35,
         level: 0.22,
-        additive: [
-          { ratio: 0.5, gain: 0.55 * lo },
-          { ratio: 1.5, gain: 0.35 * lo },
-          { ratio: 2, gain: 0.7 * lerp(0.3, 1, m.color) },
-          { ratio: 3, gain: 0.5 * hi },
-          { ratio: 4, gain: 0.45 * hi },
-          { ratio: 5, gain: 0.3 * hi },
-          { ratio: 6, gain: 0.25 * hi },
-          { ratio: 8, gain: 0.35 * hi },
-        ].filter((d) => cap(f * d.ratio) < 17000),
+        harmonics: {
+          baseRatio: 0.5,
+          amps: drawbars(f, [
+            [1, 0.55 * lo], // 16'
+            [3, 0.35 * lo], // 5⅓'
+            [4, 0.7 * lerp(0.3, 1, m.color)], // 4'
+            [6, 0.5 * hi], // 2⅔'
+            [8, 0.45 * hi], // 2'
+            [10, 0.3 * hi], // 1⅗'
+            [12, 0.25 * hi], // 1⅓'
+            [16, 0.35 * hi], // 1'
+          ]),
+        },
       }
     },
   },
@@ -317,15 +340,19 @@ export const MODELS: Record<SoundModelId, SoundModel> = {
         lfoPan: 0.15,
         lfoAmp: m.motion * 0.3,
         level: 0.2 * (0.8 + 0.2 * v),
-        additive: ([
-          { ratio: 0.5, gain: 0.5 * m.body, type: 'sine' },
-          { ratio: 1, gain: 0.45, type: 'sine', detuneCents: 4 },
-          { ratio: 2, gain: 0.5 * lerp(0.4, 1, m.color), type: 'triangle', detuneCents: -3 },
-          { ratio: 3, gain: 0.35 * mix, type: 'sine', detuneCents: 5 },
-          { ratio: 4, gain: 0.4 * mix, type: 'triangle', detuneCents: -4 },
-          { ratio: 6, gain: 0.22 * mix, type: 'sine', detuneCents: 6 },
-          { ratio: 8, gain: 0.2 * mix, type: 'sine', detuneCents: -6 },
-        ] as AdditivePartial[]).filter((d) => cap(f * d.ratio) < 17000),
+        harmonics: {
+          baseRatio: 0.5,
+          detuneCents: 5,
+          amps: drawbars(f, [
+            [1, 0.5 * m.body], // 16'
+            [2, 0.45], // 8' flute
+            [4, 0.5 * lerp(0.4, 1, m.color)], // 4'
+            [6, 0.35 * mix], // 2⅔'
+            [8, 0.4 * mix], // 2'
+            [12, 0.22 * mix], // mixture
+            [16, 0.2 * mix],
+          ]),
+        },
       }
     },
   },
@@ -393,7 +420,6 @@ export const MODELS: Record<SoundModelId, SoundModel> = {
       lfoPan: 0.2 + m.motion * 0.7,
       lfoAmp: m.motion * 0.5,
       level: 0.5 * (0.7 + 0.3 * m.body),
-      additive: [{ ratio: 0.5, gain: 0.12 * m.body }],
     }),
   },
 }

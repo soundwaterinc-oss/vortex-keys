@@ -54,6 +54,8 @@ export class SynthEngine implements NoteSink {
   private maxVoices: number
   /** shared output stage (may be handed in so several engines share one) */
   readonly chain: MasterChain
+  /** PeriodicWave cache keyed by quantized harmonic table */
+  private waves = new Map<string, PeriodicWave>()
 
   constructor(ctx: AudioContext, macros: Macros, opts: SynthOptions = { maxVoices: 24 }) {
     this.ctx = ctx
@@ -83,6 +85,21 @@ export class SynthEngine implements NoteSink {
     this.macros = { ...m }
     // SPACE is a bus-level macro handled by the shared output stage
     this.chain.setSpace(m.space)
+  }
+
+  private periodicWave(amps: number[]): PeriodicWave {
+    const key = amps.join(',')
+    let w = this.waves.get(key)
+    if (!w) {
+      const n = amps.length + 1
+      const real = new Float32Array(n)
+      const imag = new Float32Array(n)
+      for (let i = 0; i < amps.length; i++) imag[i + 1] = amps[i]
+      w = this.ctx.createPeriodicWave(real, imag, { disableNormalization: true })
+      if (this.waves.size > 256) this.waves.clear()
+      this.waves.set(key, w)
+    }
+    return w
   }
 
   get voiceCount() {
@@ -190,18 +207,19 @@ export class SynthEngine implements NoteSink {
       nodes.push(nf, ng)
     }
 
-    // additive partials (drawbars / ranks): steady, no auto-fade
-    for (const d of p.additive ?? []) {
-      if (d.gain <= 0) continue
-      const o = ctx.createOscillator()
-      o.type = d.type ?? 'sine'
-      o.frequency.setValueAtTime(safeParam(f * d.ratio, 16, 18000, f), t)
-      if (d.detuneCents) o.detune.value = d.detuneCents
-      const g = ctx.createGain()
-      g.gain.value = safeParam(d.gain, 0, 1, 0.2)
-      o.connect(g).connect(filter)
-      sources.push(o)
-      nodes.push(g)
+    // harmonic table: one PeriodicWave oscillator (plus a detuned twin for chorus)
+    if (p.harmonics && p.harmonics.amps.some((a) => a > 0)) {
+      const wave = this.periodicWave(p.harmonics.amps)
+      const base = safeParam(f * p.harmonics.baseRatio, 16, 18000, f)
+      const copies = p.harmonics.detuneCents ? [-p.harmonics.detuneCents, p.harmonics.detuneCents] : [0]
+      for (const cents of copies) {
+        const o = ctx.createOscillator()
+        o.setPeriodicWave(wave)
+        o.frequency.setValueAtTime(base, t)
+        if (cents) o.detune.value = cents
+        o.connect(filter)
+        sources.push(o)
+      }
     }
 
     // formant bank: filter -> parallel band-passes -> amp
