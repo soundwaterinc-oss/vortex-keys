@@ -36,6 +36,9 @@ export function Transport() {
       <button onClick={() => instrument.clearFlow()}>CLEAR</button>
       <button onClick={() => instrument.panic()}>PANIC</button>
       <button onClick={() => instrument.randomize()}>RANDOMIZE</button>
+      <button onClick={() => instrument.resetFlow()}>RESET</button>
+      <span className="gap" />
+      <Toggle label="MONITOR" on={s.perf.monitor} onChange={(v) => instrument.setState((st) => ({ perf: { ...st.perf, monitor: v } }))} />
       <span className="gap" />
       <button onClick={save}>SAVE</button>
       <button onClick={() => fileRef.current?.click()}>LOAD</button>

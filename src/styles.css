@@ -87,3 +87,21 @@ select, input.seed {
 .transport > * { pointer-events: auto; }
 .transport button, .transport .tgl { flex: 0 0 auto; padding: 5px 12px; background: rgba(12,14,18,0.85); }
 .transport .gap { width: 12px; }
+
+.adv { width: 100%; background: none; border: 0; color: var(--dim); font: inherit; text-align: left; padding: 4px 0; cursor: pointer; letter-spacing: 0.1em; }
+.adv:hover { color: var(--fg); }
+
+.monitor {
+  position: absolute; right: 12px; bottom: 40px; width: 300px; z-index: 2;
+  background: rgba(12,14,18,0.9); border: 1px solid var(--line); padding: 8px 10px;
+  font-size: 10px; color: var(--fg);
+}
+.mon-h { color: var(--dim); letter-spacing: 0.15em; margin-bottom: 6px; }
+.mon-row { display: grid; grid-template-columns: 44px 1fr 92px; gap: 6px; align-items: center; margin: 2px 0; }
+.mon-l { color: var(--dim); }
+.mon-bar { height: 3px; background: rgba(255,255,255,0.08); position: relative; }
+.mon-bar i { display: block; height: 100%; background: var(--acc); }
+.mon-v { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; }
+.mon-v.wide { grid-column: 2 / 4; text-align: left; }
+.mon-v.hot { color: var(--hot); }
+.mon-sep { border-top: 1px solid var(--line); margin: 6px 0; }

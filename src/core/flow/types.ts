@@ -21,6 +21,8 @@ export interface GeneratedEvent {
   /** seconds; the scheduler issues noteOff after this */
   duration: number
   brightness?: number
+  /** 0..1 stereo width hint */
+  width?: number
   /** origin id (particle id, wave component) for visual linking */
   sourceId?: string
 }

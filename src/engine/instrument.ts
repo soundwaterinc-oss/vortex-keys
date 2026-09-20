@@ -4,9 +4,16 @@ import { getScale } from '../core/tuning/scales'
 import { indexToNote, noteToCents, noteToFrequency, noteToIndex, wrapDegree } from '../core/tuning/tuning'
 import type { Scale, ScaleNote } from '../core/tuning/types'
 import type { FlowContext, FlowModel, GeneratedEvent } from '../core/flow/types'
-import { VortexModel, type VortexParams, type VortexParticle } from '../core/flow/vortex'
-import { WaveModel } from '../core/flow/wave'
 import { ManualModel } from '../core/flow/manual'
+import { PhysicsFlow, type FlowStats, type MonitorSample } from '../core/flow/physicsFlow'
+import { GravityModel } from '../core/physics/gravity'
+import { OrbitModel } from '../core/physics/orbit'
+import { WaveFieldModel } from '../core/physics/wavefield'
+import { CoupledModel } from '../core/physics/coupled'
+import { ChaosModel } from '../core/physics/chaos'
+import type { PhysicsBody, PhysicsEvent, PhysicsModel } from '../core/physics/types'
+import { ConfigurableMapper } from '../core/mapping/mapper'
+import { getMapping } from '../core/mapping/presets'
 import { createPrng, type Prng } from '../core/math/prng'
 import { quantizeTime } from '../core/clock/quantize'
 import { SynthEngine } from '../audio/synth'
@@ -27,12 +34,15 @@ export interface ActiveNote {
 
 export interface Snapshot {
   now: number
-  particles: VortexParticle[]
+  modelId: string
+  bodies: PhysicsBody[]
+  /** model-specific visual payload (see each model's visual()) */
+  visual: unknown
+  globals: Record<string, number>
+  recentEvents: PhysicsEvent[]
+  stats: FlowStats | null
+  monitor: MonitorSample | null
   active: ActiveNote[]
-  waveValue: number
-  waveHistory: Float32Array
-  waveHead: number
-  waveThreshold: number
   level: number
   voices: number
   running: boolean
@@ -43,7 +53,6 @@ type Listener = () => void
 const SIM_DT = 1 / 120 // fixed simulation step (s)
 const LOOKAHEAD = 0.12 // how far ahead of the audio clock we simulate (s)
 const TICK_MS = 25
-const WAVE_HISTORY = 512
 
 /**
  * Instrument: owns state, the flow model, the audio sinks and the scheduler.
@@ -64,8 +73,6 @@ export class Instrument {
   private held = new Set<number>()
   private sustained = new Set<number>()
   private latched = new Set<number>()
-  private waveHistory = new Float32Array(WAVE_HISTORY)
-  private waveHead = 0
   private clockOrigin = 0
   private genCounter = 0
 
@@ -109,6 +116,7 @@ export class Instrument {
     if (prev.tuning !== next.tuning) {
       // tuning changes only while nothing is sounding: stop everything cleanly
       this.panic()
+      this.pushFlowParams()
     }
   }
 
@@ -267,7 +275,7 @@ export class Instrument {
     if (this.ctx) for (const a of Array.from(this.active.values())) if (a.generated) this.sink.noteOff(a.id, this.ctx.currentTime)
   }
 
-  /** Re-seed and randomise flow parameters (deterministic from the new seed). */
+  /** Re-seed and randomise the current model's parameters (deterministic from the new seed). */
   randomize() {
     const seed = (Math.random() * 4294967295) >>> 0
     const r = createPrng(seed)
@@ -275,19 +283,12 @@ export class Instrument {
       flow: {
         ...s.flow,
         seed,
-        vortex: {
-          ...s.flow.vortex,
-          spin: 0.05 + r.next() * 0.5,
-          pull: 0.01 + r.next() * 0.08,
-          decay: 0.8 + r.next() * 0.18,
-          turbulence: r.next() * 0.4,
-          alpha: 0.5 + r.next() * 1.2,
-        },
-        wave: {
-          ...s.flow.wave,
-          baseRate: 0.08 + r.next() * 0.4,
-          threshold: 0.2 + r.next() * 0.6,
-        },
+        macros: { energy: 0.3 + r.next() * 0.5, chaos: r.next(), time: 0.35 + r.next() * 0.3, space: r.next() },
+        vortex: { ...s.flow.vortex, spin: 0.05 + r.next() * 0.5, pull: 0.01 + r.next() * 0.08, decay: 0.8 + r.next() * 0.18, alpha: 0.5 + r.next() * 1.2 },
+        orbit: { ...s.flow.orbit, eccentricity: r.next() * 0.85, speed: 0.05 + r.next() * 0.3, precession: (r.next() - 0.5) * 0.08, drift: r.next() * 0.4 },
+        wave: { ...s.flow.wave, baseRate: 0.08 + r.next() * 0.4, threshold: 0.2 + r.next() * 0.6, wavelength: 0.3 + r.next() * 1.2, sourceRotation: r.next() },
+        coupled: { ...s.flow.coupled, coupling: r.next() * 1.5, spread: r.next() * 0.5, drift: r.next() * 0.2 },
+        chaos: { ...s.flow.chaos, r: 3.3 + r.next() * 0.7, updateRate: 1 + r.next() * 5, smoothing: r.next() * 0.8 },
         gates: s.flow.gates.map((g) => ({
           ...g,
           action: (['repeat', 'degreeUp', 'degreeDown', 'octaveUp', 'octaveDown', 'velocityDown', 'spawnChild'] as const)[r.int(7)],
@@ -297,33 +298,63 @@ export class Instrument {
   }
 
   // ---------- flow ----------
+  /**
+   * Build the physics model for the current mode and wrap it with the
+   * selected mapper. Switching modes never touches the synth: sounding
+   * voices finish naturally, only generated state is dropped.
+   */
   private rebuildFlow() {
     const f = this.state.flow
     this.prng = createPrng(f.seed)
-    const old = this.flow
-    old.clear()
+    this.flow.clear()
+    let physics: PhysicsModel | null = null
     switch (f.mode) {
       case 'vortex':
-        this.flow = new VortexModel({ ...f.vortex, gates: f.gates })
+        physics = new GravityModel({ ...f.vortex, gates: f.gates })
+        break
+      case 'orbit':
+        physics = new OrbitModel({ ...f.orbit, gates: f.gates })
         break
       case 'wave':
-        this.flow = new WaveModel({ ...f.wave })
+        physics = new WaveFieldModel({ ...f.wave, ratios: [...f.wave.ratios] })
         break
-      default:
-        this.flow = new ManualModel()
+      case 'coupled':
+        physics = new CoupledModel({ ...f.coupled })
+        break
+      case 'chaos':
+        physics = new ChaosModel({ ...f.chaos })
+        break
+    }
+    if (physics) {
+      const pf = new PhysicsFlow(physics, new ConfigurableMapper(getMapping(f.mappingId)), { ...f.macros }, { ...f.limits })
+      pf.octaves = this.state.tuning.octaves
+      this.flow = pf
+    } else {
+      this.flow = new ManualModel()
     }
     this.flow.setFrozen(this.state.perf.frozen)
   }
 
+  /** Push parameter edits into the live model without resetting its state. */
   private pushFlowParams() {
     const f = this.state.flow
-    if (this.flow instanceof VortexModel) {
-      const p = this.flow.params as VortexParams
-      Object.assign(p, f.vortex)
-      p.gates = f.gates
-    } else if (this.flow instanceof WaveModel) {
-      Object.assign(this.flow.params, f.wave)
-    }
+    if (!(this.flow instanceof PhysicsFlow)) return
+    const pf = this.flow
+    pf.macros = { ...f.macros }
+    pf.limits = { ...f.limits }
+    pf.octaves = this.state.tuning.octaves
+    if (pf.mapper.config.id !== f.mappingId) pf.mapper = new ConfigurableMapper(getMapping(f.mappingId))
+    const ph = pf.physics
+    if (ph instanceof GravityModel) Object.assign(ph.params, f.vortex, { gates: f.gates })
+    else if (ph instanceof OrbitModel) Object.assign(ph.params, f.orbit, { gates: f.gates })
+    else if (ph instanceof WaveFieldModel) Object.assign(ph.params, f.wave, { ratios: [...f.wave.ratios] })
+    else if (ph instanceof CoupledModel) Object.assign(ph.params, f.coupled)
+    else if (ph instanceof ChaosModel) Object.assign(ph.params, f.chaos)
+  }
+
+  /** Re-initialise the model's internal state deterministically (coupled phases, chaos x0). */
+  resetFlow() {
+    if (this.flow instanceof PhysicsFlow) this.flow.reset(this.flowContext())
   }
 
   // ---------- scheduler ----------
@@ -336,10 +367,6 @@ export class Instrument {
     let guard = 0
     while (this.simTime < target && guard++ < 400) {
       const events = this.flow.update(SIM_DT, this.simTime, ctx)
-      if (this.flow instanceof WaveModel) {
-        this.waveHistory[this.waveHead] = this.flow.lastValue
-        this.waveHead = (this.waveHead + 1) % WAVE_HISTORY
-      }
       for (const e of events) this.scheduleEvent(e)
       this.simTime += SIM_DT
     }
@@ -360,6 +387,7 @@ export class Instrument {
     const note = { degree: w.degree, octave: oct }
     const id = `g${this.genCounter++}`
     const pn = this.resolve(note, e.velocity, id, true, e.brightness)
+    pn.width = e.width
     this.sink.noteOn(pn, t)
     this.sink.noteOff(id, t + e.duration)
     this.active.set(id, {
@@ -377,15 +405,17 @@ export class Instrument {
   // ---------- visual snapshot ----------
   snapshot(): Snapshot {
     const now = this.ctx?.currentTime ?? 0
-    const particles = this.flow instanceof VortexModel ? this.flow.particles.filter((p) => p.alive) : []
+    const pf = this.flow instanceof PhysicsFlow ? this.flow : null
     return {
       now,
-      particles,
+      modelId: this.flow.id,
+      bodies: pf ? pf.physics.bodies() : [],
+      visual: pf ? pf.physics.visual() : null,
+      globals: pf ? pf.physics.globals() : {},
+      recentEvents: pf ? pf.recent : [],
+      stats: pf ? pf.stats(this.simTime) : null,
+      monitor: pf ? pf.lastSample : null,
       active: Array.from(this.active.values()).filter((a) => a.start <= now + 0.001),
-      waveValue: this.flow instanceof WaveModel ? this.flow.lastValue : 0,
-      waveHistory: this.waveHistory,
-      waveHead: this.waveHead,
-      waveThreshold: this.state.flow.wave.threshold,
       level: this.synth?.level() ?? 0,
       voices: this.synth?.voiceCount ?? 0,
       running: this.ctx?.state === 'running',

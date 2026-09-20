@@ -166,7 +166,7 @@ export class SynthEngine implements NoteSink {
     amp.gain.setValueAtTime(0, t)
     const pan = ctx.createStereoPanner()
     // spread voices around the stereo field by pitch class (subtle)
-    pan.pan.value = safeParam(Math.sin(n.cents / 1200 * Math.PI * 2) * 0.35, -1, 1, 0)
+    pan.pan.value = safeParam(Math.sin((n.cents / 1200) * Math.PI * 2) * 0.35 * (n.width ?? 1), -1, 1, 0)
 
     // carrier
     const car = ctx.createOscillator()

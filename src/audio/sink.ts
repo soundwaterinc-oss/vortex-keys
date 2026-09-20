@@ -17,6 +17,8 @@ export interface PitchedNote {
   velocity: number
   /** 0..1 timbral hint (particle energy, wave slope) */
   brightness?: number
+  /** 0..1 stereo width multiplier (1 = full) */
+  width?: number
   /** true when produced by the FlowEngine rather than the performer */
   generated?: boolean
 }
