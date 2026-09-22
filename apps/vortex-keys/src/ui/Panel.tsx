@@ -115,6 +115,9 @@ export function Panel() {
         {(['body', 'air', 'color', 'decay', 'space', 'motion'] as const).map((k) => (
           <Slider key={k} label={k.toUpperCase()} value={s.sound.macros[k]} format={pct} onChange={(v) => setMacro(k, v)} />
         ))}
+        {/* physics-generated notes vs. played notes */}
+        <Slider label="GEN LVL" value={s.sound.macros.gen ?? 0.7} format={pct} onChange={(v) => setMacro('gen', v)} />
+        <Slider label="GEN SOFT" value={s.sound.macros.soft ?? 0.5} format={pct} onChange={(v) => setMacro('soft', v)} />
       </Section>
 
       <Section title="FLOW">

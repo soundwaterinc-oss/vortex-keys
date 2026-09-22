@@ -9,6 +9,9 @@
  *   DECAY  envelope length (attack scaled a little too)
  *   SPACE  send to delay+reverb (handled at the bus)
  *   MOTION LFO depth on pan, pitch and filter
+ *   GEN    level of physics-generated notes relative to played ones
+ *   SOFT   how much generated notes are softened (lower velocity → less
+ *          bark / bell / click), so the field stays behind the hands
  */
 export type SoundModelId = 'glass' | 'pluck' | 'wood' | 'breath' | 'pad' | 'hammond' | 'pipe' | 'voice' | 'rhodes'
 
@@ -19,9 +22,12 @@ export interface Macros {
   decay: number
   space: number
   motion: number
+  /** optional so engines that only use the six voice macros stay valid */
+  gen?: number
+  soft?: number
 }
 
-export const DEFAULT_MACROS: Macros = { body: 0.5, air: 0.2, color: 0.4, decay: 0.5, space: 0.35, motion: 0.2 }
+export const DEFAULT_MACROS: Macros = { body: 0.5, air: 0.2, color: 0.4, decay: 0.5, space: 0.35, motion: 0.2, gen: 0.7, soft: 0.5 }
 
 /**
  * Harmonic table rendered as ONE PeriodicWave oscillator (cheap additive).
@@ -337,7 +343,7 @@ export const MODELS: Record<SoundModelId, SoundModel> = {
         lfoHz: 4.8,
         lfoPitchCents: m.motion * 6,
         lfoFilterHz: 0,
-        lfoPan: 0.15,
+        lfoPan: m.motion * 0.4,
         lfoAmp: m.motion * 0.3,
         level: 0.26 * (0.8 + 0.2 * v),
         harmonics: {
@@ -384,9 +390,9 @@ export const MODELS: Record<SoundModelId, SoundModel> = {
         lfoHz: 5.2 + m.motion * 1.2,
         lfoPitchCents: 3 + m.motion * 18,
         lfoFilterHz: 0,
-        lfoPan: 0.15 + m.motion * 0.3,
+        lfoPan: m.motion * 0.45,
         level: 0.6,
-        formants: vow.map((fm, i) => ({ hz: fm.hz, q, gain: [1, 0.55, 0.3][i] })),
+        formants: vow.slice(0, 2).map((fm, i) => ({ hz: fm.hz, q, gain: [1, 0.55][i] })),
       }
     },
   },
@@ -417,7 +423,7 @@ export const MODELS: Record<SoundModelId, SoundModel> = {
       lfoHz: 3.5 + m.motion * 3.5,
       lfoPitchCents: 0,
       lfoFilterHz: 0,
-      lfoPan: 0.2 + m.motion * 0.7,
+      lfoPan: m.motion * 0.9,
       lfoAmp: m.motion * 0.5,
       level: 0.6 * (0.7 + 0.3 * m.body),
     }),

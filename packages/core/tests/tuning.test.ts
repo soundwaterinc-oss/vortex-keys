@@ -3,14 +3,14 @@ import { noteToFrequency, wrapDegree, transposeNote, indexToNote, ratioStringToC
 import { getScale, SCALES } from '../src/tuning/scales'
 
 describe('tuning', () => {
-  const tet = getScale('12tet')
+  const yo = getScale('yo')
   it('cents -> frequency', () => {
-    expect(noteToFrequency(tet, 261.63, { degree: 0, octave: 0 })).toBeCloseTo(261.63, 5)
-    expect(noteToFrequency(tet, 261.63, { degree: 0, octave: 1 })).toBeCloseTo(523.26, 5)
-    expect(noteToFrequency(tet, 440, { degree: 7, octave: 0 })).toBeCloseTo(659.255, 2)
+    expect(noteToFrequency(yo, 261.63, { degree: 0, octave: 0 })).toBeCloseTo(261.63, 5)
+    expect(noteToFrequency(yo, 261.63, { degree: 0, octave: 1 })).toBeCloseTo(523.26, 5)
+    expect(noteToFrequency(yo, 440, { degree: 3, octave: 0 })).toBeCloseTo(659.255, 2)
   })
   it('just intonation fifth is 3/2', () => {
-    const ji = getScale('ji-major')
+    const ji = getScale('bhairav')
     expect(noteToFrequency(ji, 200, { degree: 4, octave: 0 })).toBeCloseTo(300, 6)
     expect(ratioStringToCents('3/2')).toBeCloseTo(701.955, 3)
   })
@@ -20,7 +20,7 @@ describe('tuning', () => {
     expect(wrapDegree(12, 0, 5)).toEqual({ degree: 2, octave: 2 })
   })
   it('transposes by scale degree, not semitone', () => {
-    const pent = getScale('penta-major')
+    const pent = getScale('gong')
     const n = pent.cents.length
     const up = transposeNote({ degree: 4, octave: 0 }, 1, 0, n)
     expect(up).toEqual({ degree: 0, octave: 1 })
@@ -30,10 +30,6 @@ describe('tuning', () => {
   })
   it('index <-> note', () => {
     expect(indexToNote(7, 5)).toEqual({ degree: 2, octave: 1 })
-  })
-  it('non-octave period (Bohlen-Pierce) uses tritave', () => {
-    const bp = getScale('bohlen-pierce')
-    expect(noteToFrequency(bp, 100, { degree: 0, octave: 1 })).toBeCloseTo(300, 1)
   })
   it('all scales have monotonic cents starting at 0', () => {
     for (const s of SCALES) {

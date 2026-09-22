@@ -112,7 +112,7 @@ export class MasterChain {
     fbFilter.type = 'lowpass'
     fbFilter.frequency.value = 2400
     const conv = ctx.createConvolver()
-    conv.buffer = makeImpulse(ctx, opts.reverbSeconds ?? 3.2, opts.reverbDecay ?? 2.4)
+    conv.buffer = makeImpulse(ctx, opts.reverbSeconds ?? 2.0, opts.reverbDecay ?? 2.6)
     this.wet = ctx.createGain()
     this.send.connect(delay)
     delay.connect(fbFilter)

@@ -44,8 +44,8 @@ describe('event namespaces and metadata', () => {
 describe('semantic pitch', () => {
   it('degree + octave resolve through the current tuning; identity survives a tuning change', () => {
     const id = { scaleDegree: 2, octave: 0 }
-    const ji = resolvePitch(id, { scale: getScale('ji-major'), rootHz: 200 })
-    const py = resolvePitch(id, { scale: getScale('pythagorean'), rootHz: 200 })
+    const ji = resolvePitch(id, { scale: getScale('bhairav'), rootHz: 200 })
+    const py = resolvePitch(id, { scale: getScale('gong'), rootHz: 200 })
     expect(ji.frequency).toBeCloseTo(250) // 5/4
     expect(py.frequency).toBeCloseTo(253.125) // 81/64
     expect(ji.scaleDegree).toBe(py.scaleDegree)

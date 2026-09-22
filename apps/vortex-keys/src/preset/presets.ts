@@ -21,7 +21,7 @@ export function defaultPreset(): Preset {
   return {
     version: 2,
     name: 'Init',
-    tuning: { scaleId: 'penta-major', rootMidi: 48, rootHz: midiToHz(48), octaves: 4 },
+    tuning: { scaleId: 'gong', rootMidi: 48, rootHz: midiToHz(48), octaves: 4 },
     sound: { model: 'glass', layers: ['glass'], macros: { ...DEFAULT_MACROS } },
     flow: {
       mode: 'vortex',
@@ -44,7 +44,7 @@ export function defaultPreset(): Preset {
 export function defaultState(): InstrumentState {
   const p = defaultPreset()
   // the instrument opens on a warm chordal voice (bell stays a factory-preset choice)
-  p.sound = { model: 'rhodes', layers: ['rhodes'], macros: { body: 0.65, air: 0.1, color: 0.35, decay: 0.6, space: 0.45, motion: 0.25 } }
+  p.sound = { model: 'rhodes', layers: ['rhodes'], macros: { body: 0.65, air: 0.1, color: 0.35, decay: 0.6, space: 0.45, motion: 0.25, gen: 0.7, soft: 0.5 } }
   return { ...p, perf: { sustain: false, latch: false, frozen: false, monitor: false, advanced: false } }
 }
 
@@ -74,8 +74,8 @@ const PHI = (1 + Math.sqrt(5)) / 2
 export const FACTORY_PRESETS: Preset[] = [
   // ---- gravity ----
   make('Slow Glass Orbit', (p) => {
-    p.tuning.scaleId = 'ji-major'
-    p.sound.macros = { body: 0.6, air: 0.15, color: 0.35, decay: 0.8, space: 0.6, motion: 0.15 }
+    p.tuning.scaleId = 'gong'
+    p.sound.macros = { body: 0.6, air: 0.15, color: 0.35, decay: 0.8, space: 0.6, motion: 0.15, gen: 0.7, soft: 0.5 }
     p.flow.amount = 0.7
     p.flow.mappingId = 'accelerating-spiral'
     p.flow.vortex = { ...p.flow.vortex, spin: 0.12, pull: 0.02, decay: 0.92, turbulence: 0.05, alpha: 0.8 }
@@ -83,9 +83,9 @@ export const FACTORY_PRESETS: Preset[] = [
     p.time.bpm = 60
   }),
   make('Tight Vortex', (p) => {
-    p.tuning.scaleId = 'penta-minor'
+    p.tuning.scaleId = 'yo'
     p.sound.model = 'wood'
-    p.sound.macros = { body: 0.7, air: 0.35, color: 0.5, decay: 0.3, space: 0.2, motion: 0.1 }
+    p.sound.macros = { body: 0.7, air: 0.35, color: 0.5, decay: 0.3, space: 0.2, motion: 0.1, gen: 0.7, soft: 0.5 }
     p.flow.amount = 0.9
     p.flow.mappingId = 'falling-into-center'
     p.flow.macros = { energy: 0.7, chaos: 0.3, time: 0.6, space: 0.5 }
@@ -96,10 +96,10 @@ export const FACTORY_PRESETS: Preset[] = [
     p.time.quantize = '1/16'
   }),
   make('Deep Microtonal Bell', (p) => {
-    p.tuning.scaleId = 'ji-harmonic-8-16'
+    p.tuning.scaleId = 'slendro'
     p.tuning.rootMidi = 36
     p.tuning.rootHz = midiToHz(36)
-    p.sound.macros = { body: 0.8, air: 0.1, color: 0.6, decay: 1.0, space: 0.75, motion: 0.1 }
+    p.sound.macros = { body: 0.8, air: 0.1, color: 0.6, decay: 1.0, space: 0.75, motion: 0.1, gen: 0.7, soft: 0.5 }
     p.flow.amount = 0.5
     p.flow.mappingId = 'bright-core'
     p.flow.vortex = { ...p.flow.vortex, spin: 0.08, pull: 0.015, decay: 0.95, turbulence: 0.02, alpha: 0.6 }
@@ -107,9 +107,9 @@ export const FACTORY_PRESETS: Preset[] = [
     p.time.bpm = 52
   }),
   make('Register Collapse', (p) => {
-    p.tuning.scaleId = '19tet'
+    p.tuning.scaleId = 'pelog'
     p.sound.model = 'pluck'
-    p.sound.macros = { body: 0.5, air: 0.25, color: 0.6, decay: 0.4, space: 0.4, motion: 0.2 }
+    p.sound.macros = { body: 0.5, air: 0.25, color: 0.6, decay: 0.4, space: 0.4, motion: 0.2, gen: 0.7, soft: 0.5 }
     p.flow.amount = 0.8
     p.flow.mappingId = 'register-collapse'
     p.flow.vortex = { ...p.flow.vortex, spin: 0.3, pull: 0.06, decay: 0.9, turbulence: 0.08, alpha: 1.6 }
@@ -119,9 +119,9 @@ export const FACTORY_PRESETS: Preset[] = [
   // ---- orbit ----
   make('Elliptic Pulse', (p) => {
     p.flow.mode = 'orbit'
-    p.tuning.scaleId = 'jp-yo-approx'
+    p.tuning.scaleId = 'yo'
     p.sound.model = 'wood'
-    p.sound.macros = { body: 0.6, air: 0.3, color: 0.5, decay: 0.35, space: 0.3, motion: 0.1 }
+    p.sound.macros = { body: 0.6, air: 0.3, color: 0.5, decay: 0.35, space: 0.3, motion: 0.1, gen: 0.7, soft: 0.5 }
     p.flow.amount = 0.8
     p.flow.mappingId = 'spectral-orbit'
     p.flow.orbit = { ...p.flow.orbit, eccentricity: 0.75, speed: 0.25, precession: 0, drift: 0.05, quadrantEvents: true }
@@ -130,8 +130,8 @@ export const FACTORY_PRESETS: Preset[] = [
   }),
   make('Long Orbit', (p) => {
     p.flow.mode = 'orbit'
-    p.tuning.scaleId = 'ji-major'
-    p.sound.macros = { body: 0.6, air: 0.1, color: 0.3, decay: 0.9, space: 0.7, motion: 0.15 }
+    p.tuning.scaleId = 'gong'
+    p.sound.macros = { body: 0.6, air: 0.1, color: 0.3, decay: 0.9, space: 0.7, motion: 0.15, gen: 0.7, soft: 0.5 }
     p.flow.amount = 0.6
     p.flow.mappingId = 'gravity-bass'
     p.flow.orbit = { ...p.flow.orbit, orbitSize: 0.95, eccentricity: 0.4, speed: 0.06, precession: 0.005, drift: 0.02, energy: 0.97 }
@@ -140,8 +140,8 @@ export const FACTORY_PRESETS: Preset[] = [
   }),
   make('Precessing Bell', (p) => {
     p.flow.mode = 'orbit'
-    p.tuning.scaleId = 'ji-harmonic-8-16'
-    p.sound.macros = { body: 0.7, air: 0.1, color: 0.5, decay: 0.9, space: 0.6, motion: 0.2 }
+    p.tuning.scaleId = 'slendro'
+    p.sound.macros = { body: 0.7, air: 0.1, color: 0.5, decay: 0.9, space: 0.6, motion: 0.2, gen: 0.7, soft: 0.5 }
     p.flow.amount = 0.7
     p.flow.mappingId = 'spiral-melody'
     p.flow.orbit = { ...p.flow.orbit, eccentricity: 0.6, speed: 0.15, precession: 0.04, drift: 0.1 }
@@ -150,9 +150,9 @@ export const FACTORY_PRESETS: Preset[] = [
   }),
   make('Binary Drift', (p) => {
     p.flow.mode = 'orbit'
-    p.tuning.scaleId = 'unequal-7'
+    p.tuning.scaleId = 'pelog'
     p.sound.model = 'pad'
-    p.sound.macros = { body: 0.5, air: 0.2, color: 0.4, decay: 0.6, space: 0.7, motion: 0.4 }
+    p.sound.macros = { body: 0.5, air: 0.2, color: 0.4, decay: 0.6, space: 0.7, motion: 0.4, gen: 0.7, soft: 0.5 }
     p.flow.amount = 0.7
     p.flow.mappingId = 'gravity-bass'
     p.flow.macros = { energy: 0.5, chaos: 0.6, time: 0.4, space: 0.7 }
@@ -163,9 +163,9 @@ export const FACTORY_PRESETS: Preset[] = [
   // ---- wave field ----
   make('Standing Ring', (p) => {
     p.flow.mode = 'wave'
-    p.tuning.scaleId = 'penta-major'
+    p.tuning.scaleId = 'gong'
     p.sound.model = 'breath'
-    p.sound.macros = { body: 0.5, air: 0.5, color: 0.4, decay: 0.4, space: 0.5, motion: 0.25 }
+    p.sound.macros = { body: 0.5, air: 0.5, color: 0.4, decay: 0.4, space: 0.5, motion: 0.25, gen: 0.7, soft: 0.5 }
     p.flow.amount = 0.8
     p.flow.mappingId = 'spiral-melody'
     p.flow.wave = { ...p.flow.wave, sourceCount: 2, ratios: [1, 1], wavelength: 0.6, sourceRadius: 0.9, baseRate: 0.25, threshold: 0.5 }
@@ -173,9 +173,9 @@ export const FACTORY_PRESETS: Preset[] = [
   }),
   make('Interference 3:4:5', (p) => {
     p.flow.mode = 'wave'
-    p.tuning.scaleId = 'jp-in-approx'
+    p.tuning.scaleId = 'in'
     p.sound.model = 'breath'
-    p.sound.macros = { body: 0.5, air: 0.5, color: 0.4, decay: 0.35, space: 0.5, motion: 0.25 }
+    p.sound.macros = { body: 0.5, air: 0.5, color: 0.4, decay: 0.35, space: 0.5, motion: 0.25, gen: 0.7, soft: 0.5 }
     p.flow.amount = 0.85
     p.flow.mappingId = 'gravity-bass'
     p.flow.wave = { ...p.flow.wave, sourceCount: 3, ratios: [3, 4, 5], baseRate: 0.125, threshold: 0.45 }
@@ -183,9 +183,9 @@ export const FACTORY_PRESETS: Preset[] = [
   }),
   make('Slow Beating', (p) => {
     p.flow.mode = 'wave'
-    p.tuning.scaleId = 'ji-major'
+    p.tuning.scaleId = 'gong'
     p.sound.model = 'pad'
-    p.sound.macros = { body: 0.6, air: 0.2, color: 0.35, decay: 0.7, space: 0.7, motion: 0.3 }
+    p.sound.macros = { body: 0.6, air: 0.2, color: 0.35, decay: 0.7, space: 0.7, motion: 0.3, gen: 0.7, soft: 0.5 }
     p.flow.amount = 0.7
     p.flow.mappingId = 'spiral-melody'
     p.flow.wave = { ...p.flow.wave, sourceCount: 2, ratios: [1, 1.05], wavelength: 1.2, baseRate: 0.5, threshold: 0.6 }
@@ -193,9 +193,9 @@ export const FACTORY_PRESETS: Preset[] = [
   }),
   make('Irrational Drift', (p) => {
     p.flow.mode = 'wave'
-    p.tuning.scaleId = 'unequal-5'
+    p.tuning.scaleId = 'slendro'
     p.sound.model = 'pluck'
-    p.sound.macros = { body: 0.5, air: 0.3, color: 0.55, decay: 0.45, space: 0.4, motion: 0.3 }
+    p.sound.macros = { body: 0.5, air: 0.3, color: 0.55, decay: 0.45, space: 0.4, motion: 0.3, gen: 0.7, soft: 0.5 }
     p.flow.amount = 0.8
     p.flow.mappingId = 'gravity-bass'
     p.flow.wave = { ...p.flow.wave, sourceCount: 3, ratios: [1, Math.SQRT2, PHI], wavelength: 0.7, baseRate: 0.2, threshold: 0.4 }
@@ -203,8 +203,8 @@ export const FACTORY_PRESETS: Preset[] = [
   }),
   make('Expanding Waves', (p) => {
     p.flow.mode = 'wave'
-    p.tuning.scaleId = 'maqam-rast-approx'
-    p.sound.macros = { body: 0.6, air: 0.15, color: 0.45, decay: 0.7, space: 0.6, motion: 0.2 }
+    p.tuning.scaleId = 'rast'
+    p.sound.macros = { body: 0.6, air: 0.15, color: 0.45, decay: 0.7, space: 0.6, motion: 0.2, gen: 0.7, soft: 0.5 }
     p.flow.amount = 0.75
     p.flow.mappingId = 'spiral-melody'
     p.flow.wave = { ...p.flow.wave, sourceCount: 1, ratios: [1], sourceRadius: 0, wavelength: 0.35, baseRate: 0.5, threshold: 0.55, expanding: 1 }
@@ -213,9 +213,9 @@ export const FACTORY_PRESETS: Preset[] = [
   // ---- coupled ----
   make('Loose Swarm', (p) => {
     p.flow.mode = 'coupled'
-    p.tuning.scaleId = 'penta-minor'
+    p.tuning.scaleId = 'yo'
     p.sound.model = 'wood'
-    p.sound.macros = { body: 0.6, air: 0.3, color: 0.45, decay: 0.3, space: 0.35, motion: 0.15 }
+    p.sound.macros = { body: 0.6, air: 0.3, color: 0.45, decay: 0.3, space: 0.35, motion: 0.15, gen: 0.7, soft: 0.5 }
     p.flow.amount = 0.8
     p.flow.mappingId = 'swarm-pulse'
     p.flow.macros = { energy: 0.5, chaos: 0.8, time: 0.5, space: 0.7 }
@@ -224,9 +224,9 @@ export const FACTORY_PRESETS: Preset[] = [
   }),
   make('Gathering Pulse', (p) => {
     p.flow.mode = 'coupled'
-    p.tuning.scaleId = 'jp-yo-approx'
+    p.tuning.scaleId = 'yo'
     p.sound.model = 'pluck'
-    p.sound.macros = { body: 0.5, air: 0.25, color: 0.5, decay: 0.4, space: 0.4, motion: 0.2 }
+    p.sound.macros = { body: 0.5, air: 0.25, color: 0.5, decay: 0.4, space: 0.4, motion: 0.2, gen: 0.7, soft: 0.5 }
     p.flow.amount = 0.85
     p.flow.mappingId = 'swarm-pulse'
     p.flow.macros = { energy: 0.55, chaos: 0.35, time: 0.5, space: 0.5 }
@@ -235,8 +235,8 @@ export const FACTORY_PRESETS: Preset[] = [
   }),
   make('Near Synchrony', (p) => {
     p.flow.mode = 'coupled'
-    p.tuning.scaleId = 'ji-major'
-    p.sound.macros = { body: 0.6, air: 0.15, color: 0.5, decay: 0.5, space: 0.5, motion: 0.2 }
+    p.tuning.scaleId = 'gong'
+    p.sound.macros = { body: 0.6, air: 0.15, color: 0.5, decay: 0.5, space: 0.5, motion: 0.2, gen: 0.7, soft: 0.5 }
     p.flow.amount = 0.8
     p.flow.mappingId = 'swarm-pulse'
     p.flow.macros = { energy: 0.5, chaos: 0.1, time: 0.5, space: 0.3 }
@@ -245,9 +245,9 @@ export const FACTORY_PRESETS: Preset[] = [
   }),
   make('Breathing Cluster', (p) => {
     p.flow.mode = 'coupled'
-    p.tuning.scaleId = 'maqam-rast-approx'
+    p.tuning.scaleId = 'rast'
     p.sound.model = 'breath'
-    p.sound.macros = { body: 0.5, air: 0.55, color: 0.4, decay: 0.5, space: 0.6, motion: 0.3 }
+    p.sound.macros = { body: 0.5, air: 0.55, color: 0.4, decay: 0.5, space: 0.6, motion: 0.3, gen: 0.7, soft: 0.5 }
     p.flow.amount = 0.7
     p.flow.mappingId = 'swarm-pulse'
     p.flow.macros = { energy: 0.4, chaos: 0.5, time: 0.35, space: 0.6 }
@@ -257,9 +257,9 @@ export const FACTORY_PRESETS: Preset[] = [
   // ---- chaos ----
   make('Edge of Chaos', (p) => {
     p.flow.mode = 'chaos'
-    p.tuning.scaleId = 'penta-major'
+    p.tuning.scaleId = 'gong'
     p.sound.model = 'pluck'
-    p.sound.macros = { body: 0.5, air: 0.3, color: 0.55, decay: 0.4, space: 0.4, motion: 0.2 }
+    p.sound.macros = { body: 0.5, air: 0.3, color: 0.55, decay: 0.4, space: 0.4, motion: 0.2, gen: 0.7, soft: 0.5 }
     p.flow.amount = 0.8
     p.flow.mappingId = 'chaotic-melody'
     p.flow.macros = { energy: 0.5, chaos: 0.5, time: 0.5, space: 0.5 }
@@ -268,9 +268,9 @@ export const FACTORY_PRESETS: Preset[] = [
   }),
   make('Stable Cycle', (p) => {
     p.flow.mode = 'chaos'
-    p.tuning.scaleId = 'jp-yo-approx'
+    p.tuning.scaleId = 'yo'
     p.sound.model = 'wood'
-    p.sound.macros = { body: 0.6, air: 0.3, color: 0.45, decay: 0.3, space: 0.3, motion: 0.1 }
+    p.sound.macros = { body: 0.6, air: 0.3, color: 0.45, decay: 0.3, space: 0.3, motion: 0.1, gen: 0.7, soft: 0.5 }
     p.flow.amount = 0.8
     p.flow.mappingId = 'chaotic-melody'
     p.flow.macros = { energy: 0.5, chaos: 0.1, time: 0.5, space: 0.4 }
@@ -279,8 +279,8 @@ export const FACTORY_PRESETS: Preset[] = [
   }),
   make('Broken Symmetry', (p) => {
     p.flow.mode = 'chaos'
-    p.tuning.scaleId = 'unequal-7'
-    p.sound.macros = { body: 0.6, air: 0.15, color: 0.5, decay: 0.7, space: 0.55, motion: 0.2 }
+    p.tuning.scaleId = 'pelog'
+    p.sound.macros = { body: 0.6, air: 0.15, color: 0.5, decay: 0.7, space: 0.55, motion: 0.2, gen: 0.7, soft: 0.5 }
     p.flow.amount = 0.75
     p.flow.mappingId = 'spiral-melody'
     p.flow.macros = { energy: 0.5, chaos: 0.7, time: 0.45, space: 0.5 }
@@ -289,9 +289,9 @@ export const FACTORY_PRESETS: Preset[] = [
   }),
   make('Dense Attractor', (p) => {
     p.flow.mode = 'chaos'
-    p.tuning.scaleId = '12tet'
+    p.tuning.scaleId = 'rast'
     p.sound.model = 'wood'
-    p.sound.macros = { body: 0.7, air: 0.4, color: 0.5, decay: 0.25, space: 0.25, motion: 0.1 }
+    p.sound.macros = { body: 0.7, air: 0.4, color: 0.5, decay: 0.25, space: 0.25, motion: 0.1, gen: 0.7, soft: 0.5 }
     p.flow.amount = 0.9
     p.flow.mappingId = 'chaotic-melody'
     p.flow.macros = { energy: 0.8, chaos: 0.9, time: 0.7, space: 0.5 }
@@ -344,7 +344,7 @@ export function sanitizePreset(raw: unknown): Preset {
         ? (r.sound!.model as Preset['sound']['model'])
         : base.sound.model,
       layers: [],
-      macros: sanitizeParams(r.sound?.macros, base.sound.macros, { body: [0, 1], air: [0, 1], color: [0, 1], decay: [0, 1], space: [0, 1], motion: [0, 1] }),
+      macros: sanitizeParams(r.sound?.macros, base.sound.macros, { body: [0, 1], air: [0, 1], color: [0, 1], decay: [0, 1], space: [0, 1], motion: [0, 1], gen: [0, 1], soft: [0, 1] }),
     },
     flow: {
       mode: (['manual', 'vortex', 'orbit', 'wave', 'coupled', 'chaos'] as FlowMode[]).includes(f.mode as FlowMode) ? (f.mode as FlowMode) : base.flow.mode,

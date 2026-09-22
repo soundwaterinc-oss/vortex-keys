@@ -125,8 +125,13 @@ export class SynthEngine implements NoteSink {
     const f = safeParam(n.frequencyHz, 16, 16000, 440)
     while (this.voices.size >= this.maxVoices) this.steal(t)
 
-    const vel = safeParam(n.velocity, 0, 1, 0.5)
-    const bright = safeParam(n.brightness ?? 0.5, 0, 1, 0.5)
+    // generated (physics) notes: GEN scales their level, SOFT lowers the
+    // velocity/brightness the model sees so transients stay gentle
+    const gen = n.generated === true
+    const soften = gen ? 1 - 0.7 * safeParam(this.macros.soft ?? 0.5, 0, 1, 0.5) : 1
+    if (gen) scale *= safeParam(this.macros.gen ?? 0.7, 0, 1, 0.7)
+    const vel = safeParam(n.velocity, 0, 1, 0.5) * soften
+    const bright = safeParam(n.brightness ?? 0.5, 0, 1, 0.5) * (0.5 + 0.5 * soften)
     const p = model.voice(this.macros, f, vel, bright)
 
     const nodes: AudioNode[] = []

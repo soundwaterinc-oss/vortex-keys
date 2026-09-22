@@ -8,7 +8,7 @@ export interface FlowLimits {
   maxEventsPerStep: number
 }
 
-export const DEFAULT_LIMITS: FlowLimits = { maxEventsPerSecond: 24, maxEventsPerStep: 6 }
+export const DEFAULT_LIMITS: FlowLimits = { maxEventsPerSecond: 16, maxEventsPerStep: 4 }
 
 /** What the physics monitor shows: last mapped event with its numbers. */
 export interface MonitorSample {

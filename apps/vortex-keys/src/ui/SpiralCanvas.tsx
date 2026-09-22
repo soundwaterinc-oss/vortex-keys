@@ -23,7 +23,7 @@ export function SpiralCanvas() {
     const canvas = canvasRef.current!
     const ro = new ResizeObserver(() => {
       const rect = canvas.getBoundingClientRect()
-      const dpr = Math.min(2, window.devicePixelRatio || 1)
+      const dpr = Math.min(1.5, window.devicePixelRatio || 1)
       canvas.width = Math.floor(rect.width * dpr)
       canvas.height = Math.floor(rect.height * dpr)
       layoutFor(rect.width, rect.height)
@@ -63,7 +63,7 @@ export function SpiralCanvas() {
           hover: hoverRef.current,
           width: g.w,
           height: g.h,
-          dpr: Math.min(2, window.devicePixelRatio || 1),
+          dpr: Math.min(1.5, window.devicePixelRatio || 1),
           scaleName: scale.name,
         })
       }
