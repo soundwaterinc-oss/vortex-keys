@@ -42,7 +42,10 @@ export function defaultPreset(): Preset {
 }
 
 export function defaultState(): InstrumentState {
-  return { ...defaultPreset(), perf: { sustain: false, latch: false, frozen: false, monitor: false, advanced: false } }
+  const p = defaultPreset()
+  // the instrument opens on a warm chordal voice (bell stays a factory-preset choice)
+  p.sound = { model: 'rhodes', layers: ['rhodes'], macros: { body: 0.65, air: 0.1, color: 0.35, decay: 0.6, space: 0.45, motion: 0.25 } }
+  return { ...p, perf: { sustain: false, latch: false, frozen: false, monitor: false, advanced: false } }
 }
 
 function make(name: string, edit: (p: Preset) => void): Preset {

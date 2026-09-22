@@ -29,6 +29,17 @@ export function makeImpulse(ctx: BaseAudioContext, seconds: number, decay: numbe
   return buf
 }
 
+/** soft tanh curve; drive 1 = near-linear, 2 = noticeable warmth */
+export function makeSaturation(drive: number, n = 1024): Float32Array<ArrayBuffer> {
+  const c = new Float32Array(new ArrayBuffer(n * 4))
+  const norm = Math.tanh(drive)
+  for (let i = 0; i < n; i++) {
+    const x = (i / (n - 1)) * 2 - 1
+    c[i] = Math.tanh(x * drive) / norm
+  }
+  return c
+}
+
 export interface MasterChainOptions {
   masterGain?: number
   delaySeconds?: number
@@ -99,7 +110,7 @@ export class MasterChain {
     fb.gain.value = opts.delayFeedback ?? 0.32
     const fbFilter = ctx.createBiquadFilter()
     fbFilter.type = 'lowpass'
-    fbFilter.frequency.value = 3200
+    fbFilter.frequency.value = 2400
     const conv = ctx.createConvolver()
     conv.buffer = makeImpulse(ctx, opts.reverbSeconds ?? 3.2, opts.reverbDecay ?? 2.4)
     this.wet = ctx.createGain()
@@ -129,10 +140,26 @@ export class MasterChain {
     this.analyser.fftSize = 256
     this.levelBuf = new Uint8Array(new ArrayBuffer(this.analyser.fftSize))
 
+    // vintage colour: warm low shelf, rolled-off top, gentle tape-style saturation
+    const lowShelf = ctx.createBiquadFilter()
+    lowShelf.type = 'lowshelf'
+    lowShelf.frequency.value = 180
+    lowShelf.gain.value = 2.5
+    const highShelf = ctx.createBiquadFilter()
+    highShelf.type = 'highshelf'
+    highShelf.frequency.value = 5200
+    highShelf.gain.value = -5
+    const sat = ctx.createWaveShaper()
+    sat.curve = makeSaturation(1.6)
+    sat.oversample = '2x'
+
     this.input.connect(this.master)
     this.input.connect(this.send)
     this.wet.connect(this.master)
-    this.master.connect(comp)
+    this.master.connect(lowShelf)
+    lowShelf.connect(highShelf)
+    highShelf.connect(sat)
+    sat.connect(comp)
     comp.connect(limiter)
     limiter.connect(this.analyser)
     this.analyser.connect(ctx.destination)
