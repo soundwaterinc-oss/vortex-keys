@@ -4,6 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>EL-SYSTEMA ENSEMBLE</title>
+    <!-- EL-SYSTEMA Live field bridge (joins the hub only when opened with ?field) -->
+    <script src="./shared/el-systema-shapes.js"></script>
+    <script src="./shared/el-systema-transport.js"></script>
+    <script src="./shared/el-systema-control.js"></script>
+    <!-- el-systema-assr.js (the ASSR stimulus ambience) is deliberately NOT
+         loaded: control.js attaches it automatically when present, which made
+         a drone start as soon as audio did. This app should only sound notes. -->
   </head>
   <body>
     <div id="root"></div>
