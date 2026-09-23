@@ -20,7 +20,10 @@ import { makeNoise, MasterChain } from './dsp'
  * scheduler could later take over event placement.
  */
 interface Voice {
-  id: string
+  /** unique per voice: two voices of the same note never share a key */
+  key: string
+  /** the note this voice belongs to; noteOff releases every voice with this id */
+  noteId: string
   startTime: number
   nodes: AudioNode[]
   sources: (OscillatorNode | AudioBufferSourceNode)[]
@@ -49,6 +52,8 @@ export class SynthEngine implements NoteSink {
   macros: Macros
   private voices = new Map<string, Voice>()
   private order: string[] = []
+  /** makes every voice key unique, so a finished voice can never evict a live one */
+  private seq = 0
   private noiseBuffer: AudioBuffer
   private voiceBus: GainNode
   private maxVoices: number
@@ -117,7 +122,7 @@ export class SynthEngine implements NoteSink {
     this.noteOff(n.id, t)
     // loudness is shared across the stack so adding a layer doesn't clip
     const scale = 1 / Math.sqrt(this.layers.length)
-    this.layers.forEach((id, k) => this.startVoice(MODELS[id], `${n.id}#${k}`, n, t, scale))
+    this.layers.forEach((id, k) => this.startVoice(MODELS[id], `${n.id}#${k}@${this.seq++}`, n, t, scale))
   }
 
   private startVoice(model: SoundModel, key: string, n: PitchedNote, t: number, scale: number): void {
@@ -300,7 +305,7 @@ export class SynthEngine implements NoteSink {
 
     for (const s of sources) s.start(t)
 
-    const v: Voice = { id: key, startTime: t, nodes, sources, amp, release: p.release, releasing: false, peak }
+    const v: Voice = { key, noteId: n.id, startTime: t, nodes, sources, amp, release: p.release, releasing: false, peak }
     this.voices.set(key, v)
     this.order.push(key)
     // a voice leaves the pool only when its last source has actually ended,
@@ -318,8 +323,7 @@ export class SynthEngine implements NoteSink {
 
   noteOff(id: string, time: number): void {
     const t = Math.max(time, this.ctx.currentTime)
-    const prefix = `${id}#`
-    for (const v of this.voices.values()) if (v.id.startsWith(prefix)) this.release(v, t, v.release)
+    for (const v of this.voices.values()) if (v.noteId === id) this.release(v, t, v.release)
   }
 
   allNotesOff(time?: number): void {
@@ -330,8 +334,8 @@ export class SynthEngine implements NoteSink {
   /** Steal: prefer a voice already releasing, else the oldest. Fast fade. */
   private steal(t: number) {
     let victim: Voice | undefined
-    for (const id of this.order) {
-      const v = this.voices.get(id)
+    for (const key of this.order) {
+      const v = this.voices.get(key)
       if (v?.releasing) {
         victim = v
         break
@@ -365,8 +369,10 @@ export class SynthEngine implements NoteSink {
   }
 
   private cleanup(v: Voice, disconnectAt?: number) {
-    this.voices.delete(v.id)
-    const k = this.order.indexOf(v.id)
+    // only drop the map entry if it is still this voice (keys are unique, so
+    // this is belt and braces against a retrigger evicting a live voice)
+    if (this.voices.get(v.key) === v) this.voices.delete(v.key)
+    const k = this.order.indexOf(v.key)
     if (k >= 0) this.order.splice(k, 1)
     const doIt = () => {
       for (const n of v.nodes) n.disconnect()
