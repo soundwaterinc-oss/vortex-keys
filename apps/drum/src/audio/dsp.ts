@@ -119,6 +119,39 @@ export function percEnv(ctx: BaseAudioContext, t: number, o: EnvOptions): GainNo
   return g
 }
 
+/**
+ * The knock: a few milliseconds of filtered noise plus a short mid "beater"
+ * tone. This is what makes a kick land in the chest rather than just move
+ * air — the body gives weight, the transient gives the hit a location.
+ */
+export function knock(
+  ctx: AudioContext,
+  t: number,
+  dest: AudioNode,
+  noise: AudioBuffer,
+  o: { level: number; tone: number; decay: number; cutoff: number; offset?: number },
+) {
+  if (o.level <= 0.001) return
+  const s = ctx.createBufferSource()
+  s.buffer = noise
+  const lp = ctx.createBiquadFilter()
+  lp.type = 'lowpass'
+  lp.frequency.value = safeParam(o.cutoff, 200, 12000, 3000)
+  const g = percEnv(ctx, t, { attack: 0.0004, decay: o.decay, peak: o.level, curve: 5 })
+  s.connect(lp).connect(g).connect(dest)
+  s.start(t, o.offset ?? 0.02)
+  s.stop(t + 0.08)
+
+  const beat = ctx.createOscillator()
+  beat.type = 'triangle'
+  beat.frequency.setValueAtTime(safeParam(o.tone, 100, 6000, 1200), t)
+  beat.frequency.exponentialRampToValueAtTime(safeParam(o.tone * 0.45, 60, 6000, 500), t + 0.012)
+  const bg = percEnv(ctx, t, { attack: 0.0004, decay: 0.012, peak: o.level * 0.6, curve: 5 })
+  beat.connect(bg).connect(dest)
+  beat.start(t)
+  beat.stop(t + 0.06)
+}
+
 /** Band-pass with a frequency sweep, the backbone of noise-based drums. */
 export function sweptBand(ctx: BaseAudioContext, t: number, from: number, to: number, q: number, time: number): BiquadFilterNode {
   const f = ctx.createBiquadFilter()

@@ -43,7 +43,9 @@ export function Panel() {
           }}
         />
         <p className="hint">{kit.description}</p>
+        <p className="hint">PUNCH hardens the beater, shortens the body, lifts the low end out of the other tracks and deepens the duck under every kick.</p>
         <Slider label="TUNE" value={s.macros.tune} min={-12} max={12} step={0.5} format={semi} onChange={(v) => macro('tune', v)} />
+        <Slider label="PUNCH" value={s.macros.punch} format={pct} big onChange={(v) => macro('punch', v)} />
         <Slider label="GRIT" value={s.macros.grit} format={pct} onChange={(v) => macro('grit', v)} />
         <Slider label="DECAY" value={s.macros.decay} format={pct} onChange={(v) => macro('decay', v)} />
         <Slider label="SPACE" value={s.macros.space} format={pct} onChange={(v) => macro('space', v)} />

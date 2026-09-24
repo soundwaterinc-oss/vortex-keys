@@ -1,6 +1,6 @@
 import { createPrng, safeParam } from '@el-systema/core'
 import type { Hit, TrackId } from '../engine/pattern'
-import { bitCurve, impulse, noiseBuffer, percEnv, pinkBuffer, saturationCurve, sweptBand, vinylBuffer } from './dsp'
+import { bitCurve, impulse, knock, noiseBuffer, percEnv, pinkBuffer, saturationCurve, sweptBand, vinylBuffer } from './dsp'
 
 /**
  * Four kits, four ideas of what a drum is.
@@ -28,6 +28,8 @@ export interface KitMacros {
   tune: number
   /** kit-specific colour: bit depth, grain density, saturation, formant openness */
   grit: number
+  /** 0..1 — transient hardness: beater click, shorter body, harder saturation */
+  punch: number
   /** how long tails are (0..1) */
   decay: number
   /** send level to the shared delay/reverb (0..1) */
@@ -38,10 +40,15 @@ export interface KitMacros {
 
 export interface KitNodes {
   ctx: AudioContext
-  /** dry destination */
+  /** dry destination for everything but the kick */
   out: AudioNode
   /** send destination (delay → reverb) */
   send: GainNode
+  /**
+   * The kick's own path: saturated, never sent to the room, and it ducks
+   * everything else. Kicks go here so nothing smears the transient.
+   */
+  punch: AudioNode
 }
 
 /** Buffers and curves built once per context — never per hit. */
@@ -77,6 +84,12 @@ export interface Kit {
    * a lot; this brings them to the same loudness at the bus.
    */
   trim: number
+  /**
+   * Kick trim. `trim` normalises each kit's body, but the kick has its own
+   * bus, so it needs its own small correction — a bit-crushed kick and a
+   * glassy one do not arrive with the same weight.
+   */
+  kickTrim: number
   voice(hit: Hit, t: number, n: KitNodes, a: KitAssets, m: KitMacros): void
 }
 
@@ -114,7 +127,8 @@ function source(ctx: AudioContext, buf: AudioBuffer, t: number, offset = 0, rate
 // ───────────────────────────── CHAIN (Basic Channel) ─────────────────────────────
 const chain: Kit = {
   id: 'chain',
-  trim: 4.2,
+  kickTrim: 1.0,
+  trim: 3.4,
   name: 'CHAIN / dub techno',
   description: 'Basic Channel: sine kick, hiss, and a chord stab that lives in its own tail. Space is the instrument.',
   voice(h, t, n, a, m) {
@@ -125,11 +139,13 @@ const chain: Kit = {
     const drift = 1 + 0.02 * Math.sin(m.spiral * Math.PI * 2)
     switch (h.track) {
       case 'kick': {
-        const o = body(ctx, t, 108 * tune, 42 * tune, 0.07)
-        const g = percEnv(ctx, t, { attack: 0.002, decay: 0.38 * dec, peak: 0.95 * h.velocity })
-        o.connect(g)
-        fan(g, n, m.space * 0.1)
-        o.stop(t + 1.2 * dec)
+        // tight sine kick: the pitch drop happens in 30 ms, so the body is
+        // already at its note when the room hears it
+        const o = body(ctx, t, lerp(130, 200, m.punch) * tune, 49 * tune, lerp(0.05, 0.026, m.punch))
+        const g = percEnv(ctx, t, { attack: 0.0015, decay: lerp(0.3, 0.17, m.punch) * dec, peak: 1.0 * h.velocity, curve: 3.6 })
+        o.connect(g).connect(n.punch)
+        knock(ctx, t, n.punch, a.noise, { level: 0.22 * m.punch * h.velocity, tone: 1400, decay: 0.006, cutoff: 3200 })
+        o.stop(t + 0.9 * dec)
         break
       }
       case 'sub': {
@@ -192,7 +208,7 @@ const chain: Kit = {
         f.type = 'bandpass'
         f.frequency.value = lerp(900, 4000, m.grit)
         f.Q.value = 0.7
-        const g = percEnv(ctx, t, { attack: 0.35, decay: 1.6 * dec, peak: 0.1 * h.velocity, curve: 1.6 })
+        const g = percEnv(ctx, t, { attack: 0.35, decay: 1.6 * dec, peak: 0.07 * h.velocity, curve: 1.6 })
         s.connect(f).connect(g)
         fan(g, n, 0.4 + m.space)
         s.stop(t + 4 * dec)
@@ -205,6 +221,7 @@ const chain: Kit = {
 // ───────────────────────────── DUST (vintage hip-hop) ─────────────────────────────
 const dust: Kit = {
   id: 'dust',
+  kickTrim: 1.4,
   trim: 0.85,
   name: 'DUST / vintage hip-hop',
   description: '12-bit sampler grit: quantised to few levels, saturated, in a small room, over a vinyl bed.',
@@ -228,17 +245,18 @@ const dust: Kit = {
 
     switch (h.track) {
       case 'kick': {
-        const o = body(ctx, t, 128 * tune, 48 * tune, 0.045, 'triangle')
-        const g = percEnv(ctx, t, { attack: 0.001, decay: 0.3 * dec, peak: 1.0 * h.velocity, curve: 3.5 })
-        const click = source(ctx, a.noise, t, 0.11)
-        const cg = percEnv(ctx, t, { attack: 0.0005, decay: 0.012, peak: 0.3 * h.velocity })
-        const cf = ctx.createBiquadFilter()
-        cf.type = 'lowpass'
-        cf.frequency.value = 2600
-        click.connect(cf).connect(cg).connect(crush)
-        o.connect(g).connect(crush)
-        o.stop(t + 1.2 * dec)
-        click.stop(t + 0.2)
+        // the sampled kick: hard beater, short body, crushed and saturated,
+        // straight to the punch bus so the room never softens it
+        const o = body(ctx, t, lerp(150, 225, m.punch) * tune, 56 * tune, lerp(0.04, 0.022, m.punch), 'triangle')
+        const g = percEnv(ctx, t, { attack: 0.0008, decay: lerp(0.26, 0.15, m.punch) * dec, peak: 1.05 * h.velocity, curve: 4 })
+        const kickCrush = ctx.createWaveShaper()
+        kickCrush.curve = a.bits(Math.round(lerp(12, 6, m.grit)))
+        const kickSat = ctx.createWaveShaper()
+        kickSat.curve = a.sat
+        kickCrush.connect(kickSat).connect(n.punch)
+        o.connect(g).connect(kickCrush)
+        knock(ctx, t, kickCrush, a.noise, { level: 0.4 * m.punch * h.velocity, tone: 1900, decay: 0.008, cutoff: 4200, offset: 0.11 })
+        o.stop(t + 0.8 * dec)
         break
       }
       case 'sub': {
@@ -339,7 +357,8 @@ function cloud(
 
 const grain: Kit = {
   id: 'grain',
-  trim: 3.8,
+  kickTrim: 1.05,
+  trim: 5.4,
   name: 'GRAIN / particle',
   description: 'Jelinek: every hit is a cloud of grains read from a record, plus micro-clicks. Rhythm made of particles.',
   voice(h, t, n, a, m) {
@@ -354,12 +373,14 @@ const grain: Kit = {
 
     switch (h.track) {
       case 'kick': {
-        // a sine thump so the cloud has a floor to stand on
-        const o = body(ctx, t, 96 * tune, 44 * tune, 0.08)
-        const g = percEnv(ctx, t, { attack: 0.003, decay: 0.3 * dec, peak: 0.7 })
-        o.connect(g).connect(bus)
-        o.stop(t + 1.2 * dec)
-        cloud(ctx, a, t, bus, { count: density, spread: 0.05, grain: 0.03, rate: 0.5, centre: 220, q: 1.5, peak: 0.35, decay: 1.6, seed })
+        // the thump is a real drum, not a grain: the cloud sits around it
+        const o = body(ctx, t, lerp(125, 185, m.punch) * tune, 48 * tune, lerp(0.055, 0.03, m.punch))
+        const g = percEnv(ctx, t, { attack: 0.0015, decay: lerp(0.28, 0.16, m.punch) * dec, peak: 1.0 * h.velocity, curve: 3.6 })
+        o.connect(g).connect(n.punch)
+        knock(ctx, t, n.punch, a.noise, { level: 0.25 * m.punch * h.velocity, tone: 1250, decay: 0.005, cutoff: 3000 })
+        o.stop(t + 0.9 * dec)
+        // the cloud is the kick's shadow, short and behind it
+        cloud(ctx, a, t + 0.004, bus, { count: Math.max(4, density >> 1), spread: 0.04, grain: 0.022, rate: 0.5, centre: 260, q: 1.5, peak: 0.22, decay: 2.2, seed })
         break
       }
       case 'sub': {
@@ -399,7 +420,8 @@ const grain: Kit = {
 // ───────────────────────────── LIQUID (2026 electronica) ─────────────────────────────
 const liquid: Kit = {
   id: 'liquid',
-  trim: 0.95,
+  kickTrim: 1.9,
+  trim: 0.72,
   name: 'LIQUID / 2026 electronica',
   description: 'Gliding glass and swept formants, smeared transients, long wet tails. Clean and fluid.',
   voice(h, t, n, a, m) {
@@ -410,13 +432,14 @@ const liquid: Kit = {
     const open = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(m.spiral * Math.PI * 2))
     switch (h.track) {
       case 'kick': {
-        const o = body(ctx, t, 150 * tune, 38 * tune, 0.11)
-        const g = percEnv(ctx, t, { attack: 0.006, decay: 0.42 * dec, peak: 0.9 * h.velocity, curve: 2.6 })
-        const s = ctx.createWaveShaper()
-        s.curve = a.sat
-        o.connect(g).connect(s)
-        fan(s, n, m.space * 0.4)
-        o.stop(t + 1.6 * dec)
+        // still liquid, but it lands: the glide is fast and the tail is cut
+        const o = body(ctx, t, lerp(160, 230, m.punch) * tune, 47 * tune, lerp(0.075, 0.035, m.punch))
+        const g = percEnv(ctx, t, { attack: 0.002, decay: lerp(0.34, 0.2, m.punch) * dec, peak: 1.0 * h.velocity, curve: 3.2 })
+        const sat = ctx.createWaveShaper()
+        sat.curve = a.sat
+        o.connect(g).connect(sat).connect(n.punch)
+        knock(ctx, t, n.punch, a.pink, { level: 0.18 * m.punch * h.velocity, tone: 2200, decay: 0.007, cutoff: 5200 })
+        o.stop(t + 1.1 * dec)
         break
       }
       case 'sub': {
@@ -483,7 +506,7 @@ const liquid: Kit = {
         f2.type = 'bandpass'
         f2.frequency.value = 5200
         f2.Q.value = 1.4
-        const g = percEnv(ctx, t, { attack: 0.5, decay: 2.4 * dec, peak: 0.13 * h.velocity, curve: 1.3 })
+        const g = percEnv(ctx, t, { attack: 0.5, decay: 2.4 * dec, peak: 0.085 * h.velocity, curve: 1.3 })
         s.connect(f1).connect(g)
         s.connect(f2).connect(g)
         fan(g, n, 0.5 + m.space)

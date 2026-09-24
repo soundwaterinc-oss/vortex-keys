@@ -1,6 +1,7 @@
 import { FixedStepRunner, SourceClock, clamp, createPrng } from '@el-systema/core'
-import { MasterChain } from '@el-systema/audio'
+import { MasterChain, makeSaturation as saturationCurve } from '@el-systema/audio'
 import { KITS, KitAssets, type KitId, type KitMacros, type KitNodes } from '../audio/kits'
+import { lerp } from '@el-systema/core'
 import { DEFAULT_SPIRAL, emptyPattern, hitsAt, resizePattern, seedPattern, swingOffset, TRACKS, type Hit, type Pattern, type SpiralConfig, type TrackId } from './pattern'
 
 /**
@@ -20,7 +21,7 @@ export interface MachineState {
   bpm: number
   playing: boolean
   swing: number
-  macros: { tune: number; grit: number; decay: number; space: number; level: number }
+  macros: { tune: number; grit: number; decay: number; space: number; level: number; punch: number }
   spiral: SpiralConfig
   /** which track the spiral canvas edits */
   editing: TrackId
@@ -47,7 +48,7 @@ export function defaultState(): MachineState {
     bpm: 124,
     playing: false,
     swing: 0.12,
-    macros: { tune: 0, grit: 0.45, decay: 0.5, space: 0.5, level: 0.8 },
+    macros: { tune: 0, grit: 0.45, decay: 0.5, space: 0.5, level: 0.8, punch: 0.7 },
     spiral: { ...DEFAULT_SPIRAL },
     editing: 'kick',
     mutes: { kick: false, sub: false, snare: false, hat: false, perc: false, air: false },
@@ -64,6 +65,13 @@ export class Machine {
   /** per-kit level trim, on both the dry and the send path */
   private kitDry: GainNode | null = null
   private kitSend: GainNode | null = null
+  /** the kick's own path: saturated, dry, and never ducked */
+  private punchBus: GainNode | null = null
+  /** sidechain: everything but the kick passes these and ducks on every kick */
+  private duckDry: GainNode | null = null
+  private duckSend: GainNode | null = null
+  /** clears the low end out of the non-kick tracks so the kick owns it */
+  private bodyHP: BiquadFilterNode | null = null
   private clock: SourceClock | null = null
   private runner: FixedStepRunner | null = null
   private timer: number | null = null
@@ -97,9 +105,34 @@ export class Machine {
     if (p.macros && this.chain) {
       this.chain.setSpace(this.state.macros.space)
       this.chain.setMasterGain(0.35 + 0.45 * this.state.macros.level)
+      this.applyPunch()
     }
     if (p.bpm && this.clock) this.clock.bpm = this.state.bpm
     this.emit()
+  }
+
+  /**
+   * PUNCH in one gesture: how much of the low end the other tracks give up,
+   * how hard the kick bus is driven, and how deep the sidechain duck goes.
+   */
+  private applyPunch() {
+    const p = this.state.macros.punch
+    const t = this.ctx?.currentTime ?? 0
+    this.bodyHP?.frequency.setTargetAtTime(lerp(45, 190, p), t, 0.05)
+    this.punchBus?.gain.setTargetAtTime(lerp(1.1, 1.9, p) * KITS[this.state.kit].kickTrim, t, 0.05)
+  }
+
+  /** Duck the body buses under a kick landing at `t`. */
+  private duck(t: number, velocity: number) {
+    const depth = 0.12 + 0.55 * this.state.macros.punch * velocity
+    const release = 0.05 + 0.13 * (1 - this.state.macros.punch)
+    for (const g of [this.duckDry, this.duckSend]) {
+      if (!g) continue
+      g.gain.cancelScheduledValues(t)
+      g.gain.setValueAtTime(1, t)
+      g.gain.linearRampToValueAtTime(Math.max(0.05, 1 - depth), t + 0.006)
+      g.gain.setTargetAtTime(1, t + 0.012, release / 3)
+    }
   }
 
   private applyTrim() {
@@ -107,6 +140,8 @@ export class Machine {
     const t = this.ctx?.currentTime ?? 0
     this.kitDry?.gain.setTargetAtTime(trim, t, 0.03)
     this.kitSend?.gain.setTargetAtTime(trim, t, 0.03)
+    // `trim` normalises the body only; the kick bus follows kickTrim
+    this.applyPunch()
   }
 
   /** Replace the pattern (kit change, randomise, clear). */
@@ -135,12 +170,37 @@ export class Machine {
       this.chain.setSpace(this.state.macros.space)
       this.chain.setMasterGain(0.35 + 0.45 * this.state.macros.level)
       this.assets = new KitAssets(ctx)
+
+      // ── kick path ──────────────────────────────────────────────
+      // kick → drive → soft clip → low shelf → bus. No reverb send: a kick
+      // that is in the room is a kick you feel later than you see.
+      this.punchBus = ctx.createGain()
+      const punchSat = ctx.createWaveShaper()
+      punchSat.curve = saturationCurve(1.9)
+      punchSat.oversample = '2x'
+      // the weight you feel is 55-90 Hz, not 40: a peak there reads as
+      // physical on speakers that cannot reproduce the fundamental at all
+      const punchShelf = ctx.createBiquadFilter()
+      punchShelf.type = 'peaking'
+      punchShelf.frequency.value = 72
+      punchShelf.Q.value = 0.9
+      punchShelf.gain.value = 4.5
+      this.punchBus.connect(punchSat).connect(punchShelf).connect(this.chain.input)
+
+      // ── everything else ────────────────────────────────────────
+      // high-passed and ducked by the kick, dry and wet alike
       this.kitDry = ctx.createGain()
       this.kitSend = ctx.createGain()
-      this.kitDry.connect(this.chain.input)
-      this.kitSend.connect(this.chain.send)
+      this.bodyHP = ctx.createBiquadFilter()
+      this.bodyHP.type = 'highpass'
+      this.bodyHP.Q.value = 0.7
+      this.duckDry = ctx.createGain()
+      this.duckSend = ctx.createGain()
+      this.kitDry.connect(this.bodyHP).connect(this.duckDry).connect(this.chain.input)
+      this.kitSend.connect(this.duckSend).connect(this.chain.send)
       this.applyTrim()
-      this.nodes = { ctx, out: this.kitDry, send: this.kitSend }
+      this.applyPunch()
+      this.nodes = { ctx, out: this.kitDry, send: this.kitSend, punch: this.punchBus }
       this.clock = new SourceClock(() => ctx.currentTime, this.state.bpm)
       this.runner = new FixedStepRunner(this.clock, () => {}, { dt: 1 / 60, lookahead: LOOKAHEAD, maxCatchUp: 0.5 })
       this.cursor = 0
@@ -211,7 +271,9 @@ export class Machine {
   private voice(h: Hit, t: number) {
     const kit = KITS[this.state.kit]
     const m = this.state.macros
-    const macros: KitMacros = { tune: m.tune, grit: m.grit, decay: m.decay, space: m.space, spiral: h.spiral }
+    const macros: KitMacros = { tune: m.tune, grit: m.grit, decay: m.decay, space: m.space, punch: m.punch, spiral: h.spiral }
+    // the kick drives the sidechain, so it must duck before it sounds
+    if (h.track === 'kick') this.duck(t, h.velocity)
     try {
       kit.voice(h, t, this.nodes!, this.assets!, macros)
     } catch {
