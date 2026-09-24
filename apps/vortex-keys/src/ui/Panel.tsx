@@ -50,6 +50,7 @@ export function Panel() {
         <nav className="family">
           <a className="here" href="./">VORTEX KEYS</a>
           <a href="./orbit/">ORBIT</a>
+          <a href="./drum/">SPIRA</a>
         </nav>
         {!instrument.audioReady && (
           <button className="start" onClick={() => instrument.start()}>

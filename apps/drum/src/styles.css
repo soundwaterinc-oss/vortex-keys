@@ -1,0 +1,21 @@
+@import "@el-systema/shared-ui/src/base.css";
+
+/* SPIRA surfaces */
+.spiral-box { position: absolute; inset: 44px 12px 12px; }
+.spiral { display: block; touch-action: none; cursor: crosshair; }
+
+.tracks { display: flex; flex-direction: column; gap: 3px; }
+.track-row { display: grid; grid-template-columns: 1fr 62px; gap: 4px; align-items: center; }
+.chip {
+  font: inherit; font-size: 10px; letter-spacing: 0.15em; padding: 4px 8px; text-align: left;
+  border: 1px solid var(--line); border-radius: 2px; background: #111318; color: var(--dim); cursor: pointer;
+}
+.chip .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--tone, var(--dim)); margin-right: 7px; vertical-align: middle; }
+.chip.on { color: #000; background: var(--tone, var(--acc)); border-color: var(--tone, var(--acc)); }
+.chip.on .dot { background: rgba(0,0,0,0.55); }
+.chip:hover:not(.on) { color: var(--fg); }
+.track-row .tgl { font-size: 9px; padding: 4px 2px; }
+
+.transport .bpm { display: flex; align-items: center; gap: 5px; background: rgba(12,14,18,0.85); border: 1px solid var(--line); padding: 3px 8px; color: var(--dim); letter-spacing: 0.1em; }
+.transport .bpm input[type=number] { width: 44px; background: none; border: 0; color: var(--fg); font: inherit; }
+.transport .bpm input[type=range] { width: 70px; }
