@@ -1,6 +1,6 @@
 import { createPrng, safeParam } from '@el-systema/core'
 import type { Hit, TrackId } from '../engine/pattern'
-import { bitCurve, foldCurve, impulse, knock, noiseBuffer, percEnv, pinkBuffer, saturationCurve, sweptBand, vinylBuffer } from './dsp'
+import { bitCurve, foldCurve, impulse, knock, noiseBuffer, percEnv, pinkBuffer, saturationCurve, vinylBuffer } from './dsp'
 
 /**
  * Four kits, four ideas of what a drum is.
@@ -432,17 +432,44 @@ const dust: Kit = {
         break
       }
       case 'snare': {
-        // wide and soft-edged: the body carries it, the noise is a skin
-        const s = source(ctx, a.noise, t, 0.05 + h.step * 0.02)
-        const f = sweptBand(ctx, t, 1700, 1100, 0.8, 0.11)
-        const g = percEnv(ctx, t, { attack: 0.0015, decay: 0.22 * dec, peak: 0.4 * h.velocity, curve: 2.8 })
-        const o = body(ctx, t, 185 * tune, 150 * tune, 0.09, 'triangle')
-        const og = percEnv(ctx, t, { attack: 0.0015, decay: lerp(0.12, 0.26, w) * dec, peak: (0.48 + 0.42 * w) * h.velocity })
-        s.connect(f).connect(g).connect(crush)
-        o.connect(og).connect(crush)
-        sub(ctx, t, 65 * tune, n.out, 0.16 * w * h.velocity, 0.2 * dec)
-        s.stop(t + 1 * dec)
-        o.stop(t + 0.6 * dec)
+        // A rimshot off an old record: stick on rim, then the shell. There
+        // are no snare wires here — what used to be a broadband skin is now
+        // a woody crack around 1.8 kHz, gone in fifteen milliseconds, and
+        // the length comes from a low tuned shell under it.
+        const crack = source(ctx, a.noise, t, 0.05 + h.step * 0.02)
+        const woody = ctx.createBiquadFilter()
+        woody.type = 'bandpass'
+        woody.frequency.setValueAtTime(safeParam(lerp(1500, 2300, m.grit), 400, 6000, 1800), t)
+        woody.frequency.exponentialRampToValueAtTime(safeParam(lerp(900, 1400, m.grit), 300, 6000, 1100), t + 0.03)
+        woody.Q.value = 2.6
+        const cg = percEnv(ctx, t, { attack: 0.0006, decay: 0.014, peak: 0.5 * h.velocity, curve: 4.5 })
+        crack.connect(woody).connect(cg).connect(crush)
+        crack.stop(t + 0.12)
+
+        // the shell: low, slightly detuned pair so it beats the way wood does
+        for (const [ratio, lvl, det] of [[1, 1, 0], [1.42, 0.35, 4]] as const) {
+          const o = body(ctx, t, 152 * tune * ratio, 118 * tune * ratio, 0.05, 'triangle')
+          o.detune.value = det
+          const og = percEnv(ctx, t, {
+            attack: 0.0012,
+            decay: lerp(0.16, 0.3, w) * dec * (ratio > 1 ? 0.6 : 1),
+            peak: (0.5 + 0.4 * w) * lvl * h.velocity,
+            curve: 2.6,
+          })
+          o.connect(og).connect(crush)
+          o.stop(t + 1 * dec)
+        }
+        // a hair of skin rattle, well under the wood
+        const rattle = source(ctx, a.noise, t + 0.004, 0.3 + h.step * 0.01)
+        const rf = ctx.createBiquadFilter()
+        rf.type = 'bandpass'
+        rf.frequency.value = safeParam(lerp(2600, 3600, m.grit), 800, 8000, 3000)
+        rf.Q.value = 1.2
+        const rg = percEnv(ctx, t + 0.004, { attack: 0.001, decay: 0.05 * dec, peak: 0.12 * h.velocity, curve: 3 })
+        rattle.connect(rf).connect(rg).connect(crush)
+        rattle.stop(t + 0.4)
+
+        sub(ctx, t, 76 * tune, n.out, 0.2 * w * h.velocity, 0.24 * dec)
         break
       }
       case 'hat': {
@@ -498,7 +525,11 @@ function cloud(
   o: { count: number; spread: number; grain: number; rate: number; centre: number; q: number; peak: number; decay: number; seed: number },
 ) {
   const rnd = createPrng(o.seed)
-  for (let i = 0; i < o.count; i++) {
+  // A grain is four nodes, and at fine settings a single hit can ask for
+  // more than a hundred of them; past this the texture stops getting finer
+  // and only gets more expensive.
+  const count = Math.min(64, o.count)
+  for (let i = 0; i < count; i++) {
     const at = t + rnd.next() * o.spread
     const dur = o.grain * (0.5 + rnd.next())
     const s = ctx.createBufferSource()
@@ -510,7 +541,7 @@ function cloud(
     f.Q.value = o.q
     const g = ctx.createGain()
     g.gain.setValueAtTime(0, at)
-    const peak = o.peak * (0.4 + 0.6 * rnd.next()) * Math.pow(1 - i / o.count, o.decay)
+    const peak = o.peak * (0.4 + 0.6 * rnd.next()) * Math.pow(1 - i / count, o.decay)
     g.gain.linearRampToValueAtTime(peak, at + dur * 0.4)
     g.gain.linearRampToValueAtTime(0, at + dur)
     const pan = ctx.createStereoPanner()
@@ -530,17 +561,17 @@ function cloud(
  */
 const grain: Kit = {
   id: 'grain',
-  kickTrim: 1.05,
+  kickTrim: 1.45,
   trim: 7.6,
   name: 'GRAIN / Jan Jelinek',
-  description: 'After Jelinek: short grains cut from a record, micro-clicks, and a kick that stands under them. Particles first, haze second.',
+  description: 'After Jelinek: very fine grains cut from a record — a few milliseconds each, many of them — micro-clicks, and a hard kick standing under the dust.',
   humanize: 0.25,
   voice(h, t, n, a, m) {
     const ctx = n.ctx
     const tune = semi(m.tune) * cents(m.bend)
     const dec = lerp(0.7, 2.0, m.decay)
     const w = m.weight * m.mass
-    const density = Math.round(lerp(6, 34, m.grit))
+    const density = Math.round(lerp(10, 52, m.grit))
     const seed = h.turn * 7717 + h.step * 131 + (['kick', 'sub', 'snare', 'hat', 'perc', 'air'] as TrackId[]).indexOf(h.track)
     const bus = ctx.createGain()
     bus.gain.value = h.velocity
@@ -557,12 +588,12 @@ const grain: Kit = {
     switch (h.track) {
       case 'kick': {
         const o = body(ctx, t, lerp(135, 200, m.punch) * tune, 48 * tune, lerp(0.05, 0.026, m.punch))
-        const g = percEnv(ctx, t, { attack: 0.0015, decay: lerp(0.3, 0.17, m.punch) * dec, peak: 1.1 * h.velocity, curve: 3.6 })
+        const g = percEnv(ctx, t, { attack: 0.0012, decay: lerp(0.32, 0.18, m.punch) * dec, peak: 1.2 * h.velocity, curve: 3.8 })
         o.connect(g).connect(n.punch)
-        knock(ctx, t, n.punch, a.noise, { level: 0.2 * m.punch * h.velocity, tone: 1350, decay: 0.006, cutoff: 3000 })
+        knock(ctx, t, n.punch, a.noise, { level: 0.28 * m.punch * h.velocity, tone: 1450, decay: 0.006, cutoff: 3400 })
         sub(ctx, t, 31 * tune, n.punch, 0.46 * w * h.velocity, lerp(0.2, 0.58, w) * dec)
         o.stop(t + 0.9 * dec)
-        cloud(ctx, a, t + 0.004, bus, { count: Math.max(4, density >> 1), spread: 0.04, grain: 0.022, rate: 0.5, centre: 260, q: 1.5, peak: 0.19, decay: 2.2, seed })
+        cloud(ctx, a, t + 0.004, bus, { count: Math.max(6, density >> 1), spread: 0.035, grain: 0.009, rate: 0.5, centre: 280, q: 1.8, peak: 0.16, decay: 2.2, seed })
         break
       }
       case 'sub': {
@@ -575,11 +606,11 @@ const grain: Kit = {
       }
       case 'snare':
         // long overlapping grains, not a burst: the hit is the envelope
-        cloud(ctx, a, t, bus, { count: density * 2, spread: 0.09 * dec, grain: lerp(0.022, 0.05, w), rate: lerp(1.4, 0.8, w), centre: lerp(1800, 800, w), q: 2.4, peak: 0.34 + 0.17 * w, decay: 1.9, seed })
+        cloud(ctx, a, t, bus, { count: density * 2, spread: 0.07 * dec, grain: lerp(0.006, 0.016, w), rate: lerp(1.5, 0.9, w), centre: lerp(2200, 1000, w), q: 3.2, peak: 0.26 + 0.13 * w, decay: 1.9, seed })
         sub(ctx, t, 62 * tune, n.out, 0.15 * w * h.velocity, 0.24 * dec)
         break
       case 'hat':
-        cloud(ctx, a, t, bus, { count: Math.max(3, density >> 1), spread: 0.025, grain: lerp(0.008, 0.02, w), rate: lerp(2.6, 1.4, w), centre: lerp(7200, 3600, w), q: 4, peak: 0.22 + 0.11 * w, decay: 2.4, seed })
+        cloud(ctx, a, t, bus, { count: Math.max(5, Math.round(density * 0.7)), spread: 0.018, grain: lerp(0.0035, 0.008, w), rate: lerp(2.8, 1.6, w), centre: lerp(8000, 4200, w), q: 5, peak: 0.17 + 0.09 * w, decay: 2.4, seed })
         break
       case 'perc': {
         // the click first — a single impulse through a narrow band — and the
@@ -600,12 +631,12 @@ const grain: Kit = {
         const g = percEnv(ctx, t + 0.006, { attack: 0.004, decay: 0.08 * dec, peak: 0.3, curve: 3 })
         s3.connect(bp).connect(g).connect(bus)
         s3.stop(t + 0.4 * dec)
-        cloud(ctx, a, t + 0.01, bus, { count: 6, spread: 0.12 * dec, grain: 0.05, rate: 0.9, centre: 1200, q: 1.2, peak: 0.14, decay: 1.2, seed: seed + 1 })
+        cloud(ctx, a, t + 0.01, bus, { count: 10, spread: 0.1 * dec, grain: 0.012, rate: 0.9, centre: 1400, q: 2.2, peak: 0.12, decay: 1.2, seed: seed + 1 })
         break
       }
       case 'air':
         // the haze the record was carrying all along
-        cloud(ctx, a, t, bus, { count: density * 2, spread: 0.9 * dec, grain: lerp(0.09, 0.18, w), rate: lerp(0.6, 0.35, w), centre: lerp(800, 300, w), q: 0.8, peak: 0.09 + 0.09 * w, decay: 0.7, seed: seed + 9 })
+        cloud(ctx, a, t, bus, { count: density * 2, spread: 0.8 * dec, grain: lerp(0.014, 0.035, w), rate: lerp(0.7, 0.4, w), centre: lerp(1100, 400, w), q: 1.4, peak: 0.08 + 0.08 * w, decay: 0.7, seed: seed + 9 })
         break
     }
   },
