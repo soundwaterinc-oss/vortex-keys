@@ -57,6 +57,12 @@ export interface SpiralConfig {
   mass: number
   /** 0..1 — how much the spiral opens and closes, eighth axis, 6.5 turns */
   gate: number
+  /**
+   * 0..1 — how often a step fires more than once. A roll divides the step
+   * into 2-4 and plays them, each quieter than the last, which is the
+   * cheapest way to raise the note count without changing the figure.
+   */
+  roll: number
   seed: number
 }
 
@@ -73,6 +79,7 @@ export const DEFAULT_SPIRAL: SpiralConfig = {
   grind: 0.25,
   mass: 0.4,
   gate: 0.35,
+  roll: 0.15,
   seed: 7,
 }
 
@@ -157,6 +164,8 @@ export interface Hit {
   grind: number
   /** sub-layer multiplier around 1 */
   mass: number
+  /** offset inside the step, in fractions of a step: rolls land here */
+  micro: number
 }
 
 const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v)
@@ -248,7 +257,25 @@ export function hitsAt(pattern: Pattern, globalIndex: number, cfg: SpiralConfig)
       fold: ax.fold,
       grind: ax.grind,
       mass: ax.mass,
+      micro: 0,
     })
+
+    // rolls: the step is divided and played again inside itself. The kick
+    // and the bed stay whole — a rolled kick is a different instrument.
+    if (cfg.roll > 0 && track !== 'kick' && track !== 'air') {
+      const r = createPrng(cfg.seed * 977 + globalIndex * 37 + TRACKS.indexOf(track) * 613)
+      // hats and percussion roll freely; the bass only sometimes
+      if (r.next() < cfg.roll * (track === 'sub' ? 0.5 : 1)) {
+        const divisions = 2 + r.int(2 + Math.round(cfg.roll * 3))
+        for (let k = 1; k < divisions; k++) {
+          hits.push({
+            ...hits[hits.length - 1],
+            velocity: clamp01(v * (1 - (0.22 * k) / divisions) * 0.8),
+            micro: k / divisions,
+          })
+        }
+      }
+    }
   }
   return hits
 }

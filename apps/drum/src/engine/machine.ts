@@ -342,6 +342,8 @@ export class Machine {
         let offset = h.warp * stepSec * 0.5
         // the kit's own feel: a fixed lean per track, then a seeded wander
         offset += (kit.timing?.[h.track] ?? 0) * stepSec
+        // a roll's repeats land inside the step
+        offset += h.micro * stepSec
         let velocity = h.velocity
         if (kit.humanize) {
           const r = createPrng(this.state.spiral.seed * 17 + this.cursor * 131 + TRACKS.indexOf(h.track) * 7919)

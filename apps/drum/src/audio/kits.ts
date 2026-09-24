@@ -192,58 +192,6 @@ function source(ctx: AudioContext, buf: AudioBuffer, t: number, offset = 0, rate
   return s
 }
 
-/**
- * A metallic resonator: a very short delay fed back on itself rings at
- * 1/delay Hz. Ping it with an impulse and you get a tuned, inharmonic ping
- * with no oscillator at all — the Monolake kit is built out of these.
- *
- * It tears itself down after `life` seconds. A delay in a feedback loop is
- * never collected on its own — it is a cycle, and it keeps running — so
- * without this every hit would leave a ringing loop behind and the graph
- * would fill up and eventually blow out.
- *
- * Note the loop delay cannot go below one render quantum (128 samples), so
- * the feedback gain is computed from the delay the graph will actually use,
- * not from the one we asked for.
- */
-function resonator(
-  ctx: AudioContext,
-  t: number,
-  hz: number,
-  decay: number,
-  damp = 5200,
-  life = decay * 2.5 + 0.2,
-): { input: GainNode; output: GainNode } {
-  const input = ctx.createGain()
-  const output = ctx.createGain()
-  const d = ctx.createDelay(0.2)
-  const asked = 1 / Math.max(40, hz)
-  const actual = Math.max(128 / ctx.sampleRate, asked)
-  d.delayTime.value = safeParam(asked, 0.0002, 0.2, 0.004)
-  const fb = ctx.createGain()
-  // feedback for the wanted decay: g = 10^(-3 * delay / decay)
-  fb.gain.value = safeParam(Math.pow(10, (-3 * actual) / Math.max(0.02, decay)), 0, 0.96, 0.9)
-  const lp = ctx.createBiquadFilter()
-  lp.type = 'lowpass'
-  lp.frequency.value = safeParam(damp, 200, 18000, 5000)
-  input.connect(d)
-  d.connect(lp).connect(fb).connect(d)
-  d.connect(output)
-
-  // close the loop down, then let the nodes go
-  const end = t + life
-  fb.gain.setValueAtTime(fb.gain.value, Math.max(t, ctx.currentTime))
-  fb.gain.setTargetAtTime(0, end, 0.05)
-  output.gain.setTargetAtTime(0, end, 0.06)
-  window.setTimeout(
-    () => {
-      for (const node of [input, d, lp, fb, output]) node.disconnect()
-    },
-    Math.max(0, (end + 0.6 - ctx.currentTime) * 1000),
-  )
-  return { input, output }
-}
-
 /** A single very short impulse: the smallest event that still has a pitch. */
 function click(ctx: AudioContext, t: number, dest: AudioNode, level: number, hz: number, q = 12, len = 0.004) {
   const o = ctx.createOscillator()
@@ -259,117 +207,153 @@ function click(ctx: AudioContext, t: number, dest: AudioNode, level: number, hz:
   o.stop(t + len * 6 + 0.01)
 }
 
-// ───────────────────────── CHAIN · after Monolake ─────────────────────────
 /**
- * Robert Henke's dub techno, not Basic Channel's: the reverb is replaced by
- * grid-locked ping-pong delay, the chord by metallic resonators, and every
- * edge is deliberate. Surgical rather than submerged — the space is
- * architecture, and the delay taps are part of the pattern.
+ * A struck membrane: a pitched head that drops fast, a slap of band-passed
+ * noise, and a body that rings low. This is a hand drum rather than a
+ * machine — the tuning moves from hit to hit and the slap is what carries
+ * the rhythm, not a transient click.
+ */
+function membrane(
+  ctx: AudioContext,
+  t: number,
+  dest: AudioNode,
+  a: KitAssets,
+  o: { hz: number; slap: number; decay: number; level: number; damp: number },
+) {
+  const o1 = body(ctx, t, o.hz * 1.8, o.hz, 0.035, 'triangle')
+  const g = percEnv(ctx, t, { attack: 0.0015, decay: o.decay, peak: o.level, curve: 3 })
+  const lp = ctx.createBiquadFilter()
+  lp.type = 'lowpass'
+  lp.frequency.value = safeParam(o.damp, 200, 9000, 1800)
+  o1.connect(g).connect(lp).connect(dest)
+  o1.stop(t + o.decay * 3 + 0.1)
+
+  if (o.slap > 0.002) {
+    // the hand: a dark band of noise, gone in twenty milliseconds
+    const s = ctx.createBufferSource()
+    s.buffer = a.noise
+    s.start(t, 0.3 + (o.hz % 7) * 0.05)
+    const bp = ctx.createBiquadFilter()
+    bp.type = 'bandpass'
+    bp.frequency.value = safeParam(o.hz * 4.5, 120, 6000, 900)
+    bp.Q.value = 1.4
+    const sg = percEnv(ctx, t, { attack: 0.0006, decay: 0.018, peak: o.slap, curve: 4 })
+    s.connect(bp).connect(sg).connect(dest)
+    s.stop(t + 0.12)
+  }
+}
+
+// ───────────────────── CHAIN · after Azu Tiwaline ─────────────────────
+/**
+ * Desert dub rather than Berlin dub: the weight is in skin and earth, not
+ * in metal. Hand drums carry the rhythm, the bass is long and filtered, the
+ * delay is dark and smeared, and the top is sand rather than hi-hat. Nothing
+ * up there is bright on purpose — the air in this kit is dust in the wind.
  */
 const chain: Kit = {
   id: 'chain',
   kickTrim: 1.0,
-  trim: 1.7,
-  name: 'CHAIN / Monolake',
-  description: 'After Monolake: grid-locked ping-pong delay instead of a room, metallic resonators instead of a chord, every edge deliberate.',
+  trim: 2.4,
+  name: 'CHAIN / Azu Tiwaline',
+  description: 'After Azu Tiwaline: desert dub — hand drums and skin instead of metal, a long filtered bass, dark smeared delay, sand in the top.',
+  humanize: 0.3,
+  timing: { perc: 0.05, hat: -0.02 },
   voice(h, t, n, a, m) {
     const ctx = n.ctx
     const tune = semi(m.tune) * cents(m.bend)
     const dec = lerp(0.6, 1.8, m.decay)
-    // the mass axis makes the weight itself breathe over 13 turns
     const w = m.weight * m.mass
-    // the resonators are tuned to a fifth apart and drift over the spiral
-    const drift = 1 + 0.02 * Math.sin(m.spiral * Math.PI * 2)
+    // the drums retune slowly as the spiral turns, the way a skin does
+    const skin = 1 + 0.05 * Math.sin(m.spiral * Math.PI * 2)
     switch (h.track) {
       case 'kick': {
-        // clean and closed: no saturation grit, just a controlled drop
-        const o = body(ctx, t, lerp(120, 190, m.punch) * tune, 49 * tune, lerp(0.05, 0.026, m.punch))
-        const g = percEnv(ctx, t, { attack: 0.0015, decay: lerp(0.3, 0.17, m.punch) * dec, peak: 1.0 * h.velocity, curve: 3.6 })
-        const fd = folder(ctx, a, m.fold * 0.35, m.grind * 0.5)
+        const o = body(ctx, t, lerp(115, 175, m.punch) * tune, 47 * tune, lerp(0.055, 0.03, m.punch))
+        const g = percEnv(ctx, t, { attack: 0.002, decay: lerp(0.33, 0.2, m.punch) * dec, peak: 1.0 * h.velocity, curve: 3.2 })
+        const fd = folder(ctx, a, m.fold * 0.35, m.grind * 0.4)
         o.connect(g).connect(fd).connect(n.punch)
-        knock(ctx, t, n.punch, a.noise, { level: 0.1 * m.punch * h.velocity, tone: 1400, decay: 0.005, cutoff: 2800 })
-        sub(ctx, t, 30 * tune, n.punch, 0.42 * w * h.velocity, lerp(0.2, 0.55, w) * dec)
-        o.stop(t + 0.9 * dec)
+        knock(ctx, t, n.punch, a.noise, { level: 0.09 * m.punch * h.velocity, tone: 900, decay: 0.008, cutoff: 1800 })
+        sub(ctx, t, 29 * tune, n.punch, 0.46 * w * h.velocity, lerp(0.22, 0.6, w) * dec)
+        o.stop(t + 0.95 * dec)
         break
       }
       case 'sub': {
-        const o = body(ctx, t, 62 * tune, 38 * tune, 0.22)
-        const g = percEnv(ctx, t, { attack: 0.008, decay: lerp(0.7, 1.4, w) * dec, peak: (0.5 + 0.5 * w) * h.velocity, curve: 1.8 })
-        o.connect(g).connect(n.out)
-        sub(ctx, t, 31 * tune, n.punch, 0.3 * w * h.velocity, 0.42 * dec)
-        o.stop(t + 3 * dec)
+        // the long bass: a filter opens across the note rather than an attack
+        const o = body(ctx, t, 58 * tune, 36 * tune, 0.3)
+        const lp = ctx.createBiquadFilter()
+        lp.type = 'lowpass'
+        lp.frequency.setValueAtTime(safeParam(90, 40, 4000, 90), t)
+        lp.frequency.exponentialRampToValueAtTime(safeParam(lerp(180, 520, m.grit), 60, 4000, 300), t + 0.25 * dec)
+        lp.Q.value = 3
+        const g = percEnv(ctx, t, { attack: 0.012, decay: lerp(0.8, 1.6, w) * dec, peak: (0.55 + 0.45 * w) * h.velocity, curve: 1.7 })
+        o.connect(lp).connect(g)
+        fan(g, n, m.space * 0.25)
+        const e = ctx.createGain()
+        e.gain.value = m.space * 0.2
+        g.connect(e).connect(n.echo)
+        sub(ctx, t, 29 * tune, n.punch, 0.3 * w * h.velocity, 0.5 * dec)
+        o.stop(t + 3.5 * dec)
         break
       }
       case 'snare': {
-        // a short filtered burst pinging a resonator: body without a drum
-        const s = source(ctx, a.noise, t, 0.3 + h.step * 0.01)
-        const f = sweptBand(ctx, t, 2400, 1200, 1.1, 0.14)
-        const g = percEnv(ctx, t, { attack: 0.001, decay: lerp(0.09, 0.16, w) * dec, peak: (0.22 + 0.16 * w) * h.velocity, curve: 3.4 })
-        const res = resonator(ctx, t, 196 * tune * drift, 0.2 * dec, 3000)
-        s.connect(f).connect(g)
-        g.connect(res.input)
-        g.connect(n.out)
-        res.output.connect(n.out)
-        // the repeats are the arrangement
+        // a dark rim and a skin: no snare wires, nothing above 3 kHz
+        membrane(ctx, t, n.out, a, {
+          hz: 178 * tune * skin,
+          slap: 0.2 * h.velocity,
+          decay: lerp(0.12, 0.22, w) * dec,
+          level: (0.4 + 0.25 * w) * h.velocity,
+          damp: lerp(1900, 3600, m.grit),
+        })
         const e = ctx.createGain()
-        e.gain.value = 0.35 + 0.5 * m.space
-        res.output.connect(e).connect(n.echo)
-        sub(ctx, t, 60 * tune, n.out, 0.2 * w * h.velocity, 0.18 * dec)
-        s.stop(t + 0.6 * dec)
+        e.gain.value = 0.3 + 0.45 * m.space
+        membrane(ctx, t, e, a, { hz: 178 * tune * skin, slap: 0.12 * h.velocity, decay: 0.1 * dec, level: 0.2 * h.velocity, damp: 1600 })
+        e.connect(n.echo)
+        sub(ctx, t, 59 * tune, n.out, 0.18 * w * h.velocity, 0.2 * dec)
         break
       }
       case 'hat': {
-        // a click through a high resonator: metal, and very short
-        const res = resonator(ctx, t, lerp(3200, 5600, m.grit) * tune, 0.04 + 0.04 * w, 6800)
-        click(ctx, t, res.input, (0.16 + 0.07 * w) * h.velocity, lerp(3400, 6000, m.grit), 9, 0.002)
-        res.output.connect(n.out)
-        const e = ctx.createGain()
-        e.gain.value = 0.25 + 0.45 * m.space
-        res.output.connect(e).connect(n.echo)
+        // sand, not metal: a short band of noise low enough to stay warm
+        const s = source(ctx, a.pink, t, 0.4 + h.step * 0.019, lerp(1, 1.5, m.grit))
+        const f = ctx.createBiquadFilter()
+        f.type = 'bandpass'
+        f.frequency.value = lerp(3000, 5600, m.grit)
+        f.Q.value = lerp(1.2, 0.6, w)
+        const g = percEnv(ctx, t, { attack: 0.0008, decay: lerp(0.035, 0.07, w), peak: (0.22 + 0.1 * w) * h.velocity, curve: 3.5 })
+        s.connect(f).connect(g)
+        fan(g, n, m.space * 0.3)
+        s.stop(t + 0.3)
         break
       }
       case 'perc': {
-        // the voice of the kit: two resonators a fifth apart, pinged, then
-        // handed to the delay, which is where the harmony actually happens
-        const base = 146.8 * tune * drift
-        const g = percEnv(ctx, t, { attack: 0.0008, decay: 0.02, peak: 0.34 * h.velocity, curve: 5 })
-        const src = source(ctx, a.noise, t, 0.12 + h.step * 0.02)
-        const hp = ctx.createBiquadFilter()
-        hp.type = 'highpass'
-        hp.frequency.value = 320
-        src.connect(hp).connect(g)
-        src.stop(t + 0.1)
-        const mix = ctx.createGain()
-        mix.gain.value = 0.5
-        for (const [ratio, lvl] of [[1, 1], [1.498, 0.7], [2.997, 0.4]] as const) {
-          const res = resonator(ctx, t, base * ratio, lerp(0.35, 0.9, m.decay), lerp(1800, 3800, m.grit))
-          g.connect(res.input)
-          const rg = ctx.createGain()
-          rg.gain.value = lvl
-          res.output.connect(rg).connect(mix)
-        }
-        const fd = folder(ctx, a, m.fold * 0.5, m.grind * 0.6)
-        mix.connect(fd)
-        fan(fd, n, m.space * 0.35)
+        // the hand drum that carries the rhythm — two strokes, dark and tuned
+        const hz = (h.step % 3 === 0 ? 118 : 156) * tune * skin
+        membrane(ctx, t, n.out, a, {
+          hz,
+          slap: 0.3 * h.velocity,
+          decay: lerp(0.16, 0.34, m.decay) * dec,
+          level: (0.5 + 0.2 * w) * h.velocity,
+          damp: lerp(1600, 3400, m.grit),
+        })
         const e = ctx.createGain()
-        e.gain.value = 0.5 + 0.6 * m.space
-        fd.connect(e).connect(n.echo)
-        sub(ctx, t, 36.7 * tune, n.out, 0.2 * w * h.velocity, 0.5 * dec)
+        e.gain.value = 0.45 + 0.6 * m.space
+        membrane(ctx, t, e, a, { hz, slap: 0.14 * h.velocity, decay: 0.14 * dec, level: 0.28 * h.velocity, damp: 1500 })
+        e.connect(n.echo)
+        sub(ctx, t, hz * 0.25, n.out, 0.22 * w * h.velocity, 0.3 * dec)
         break
       }
       case 'air': {
-        // low rumble, not hiss: the bed carries weight, not noise
+        // wind over sand: low noise moving slowly across the field
         const s = source(ctx, a.pink, t, (h.turn * 0.37) % 2, 1, true)
         const f = ctx.createBiquadFilter()
         f.type = 'lowpass'
-        f.frequency.value = lerp(700, 220, w)
+        f.frequency.setValueAtTime(safeParam(lerp(900, 300, w), 120, 4000, 500), t)
+        f.frequency.exponentialRampToValueAtTime(safeParam(lerp(400, 180, w), 100, 4000, 260), t + 1.2 * dec)
         f.Q.value = 0.9
-        const g = percEnv(ctx, t, { attack: 0.2, decay: 0.9 * dec, peak: (0.05 + 0.08 * w) * h.velocity, curve: 1.8 })
+        const g = percEnv(ctx, t, { attack: 0.3, decay: 1.1 * dec, peak: (0.07 + 0.1 * w) * h.velocity, curve: 1.7 })
         const pan = ctx.createStereoPanner()
-        pan.pan.value = Math.sin(m.spiral * Math.PI * 2) * 0.6
+        pan.pan.value = Math.sin(m.spiral * Math.PI * 2) * 0.7
         s.connect(f).connect(g).connect(pan)
         fan(pan, n, 0.2 + m.space * 0.5)
-        s.stop(t + 3 * dec)
+        s.stop(t + 3.5 * dec)
         break
       }
     }
@@ -549,7 +533,7 @@ const grain: Kit = {
   kickTrim: 1.05,
   trim: 7.6,
   name: 'GRAIN / Jan Jelinek',
-  description: 'After Jelinek: warm looped haze from a record rather than clicks — long overlapping grains, muted, the hit only a shape in the cloud.',
+  description: 'After Jelinek: short grains cut from a record, micro-clicks, and a kick that stands under them. Particles first, haze second.',
   humanize: 0.25,
   voice(h, t, n, a, m) {
     const ctx = n.ctx
@@ -564,21 +548,21 @@ const grain: Kit = {
     // ever arrives as a click
     const haze = ctx.createBiquadFilter()
     haze.type = 'lowpass'
-    haze.frequency.value = lerp(2600, 5200, m.grit)
-    haze.Q.value = 0.6
+    haze.frequency.value = lerp(5200, 11000, m.grit)
+    haze.Q.value = 0.5
     const fd = folder(ctx, a, m.fold * 0.45, m.grind * 0.4)
     bus.connect(haze).connect(fd)
     fan(fd, n, 0.3 + m.space * 0.8)
 
     switch (h.track) {
       case 'kick': {
-        const o = body(ctx, t, lerp(125, 185, m.punch) * tune, 48 * tune, lerp(0.055, 0.03, m.punch))
-        const g = percEnv(ctx, t, { attack: 0.002, decay: lerp(0.28, 0.16, m.punch) * dec, peak: 1.0 * h.velocity, curve: 3.4 })
+        const o = body(ctx, t, lerp(135, 200, m.punch) * tune, 48 * tune, lerp(0.05, 0.026, m.punch))
+        const g = percEnv(ctx, t, { attack: 0.0015, decay: lerp(0.3, 0.17, m.punch) * dec, peak: 1.1 * h.velocity, curve: 3.6 })
         o.connect(g).connect(n.punch)
-        knock(ctx, t, n.punch, a.noise, { level: 0.1 * m.punch * h.velocity, tone: 1100, decay: 0.006, cutoff: 2200 })
+        knock(ctx, t, n.punch, a.noise, { level: 0.2 * m.punch * h.velocity, tone: 1350, decay: 0.006, cutoff: 3000 })
         sub(ctx, t, 31 * tune, n.punch, 0.46 * w * h.velocity, lerp(0.2, 0.58, w) * dec)
         o.stop(t + 0.9 * dec)
-        cloud(ctx, a, t + 0.006, bus, { count: Math.max(4, density >> 1), spread: 0.06, grain: 0.05, rate: 0.45, centre: 240, q: 1.2, peak: 0.19, decay: 2.2, seed })
+        cloud(ctx, a, t + 0.004, bus, { count: Math.max(4, density >> 1), spread: 0.04, grain: 0.022, rate: 0.5, centre: 260, q: 1.5, peak: 0.19, decay: 2.2, seed })
         break
       }
       case 'sub': {
@@ -591,24 +575,32 @@ const grain: Kit = {
       }
       case 'snare':
         // long overlapping grains, not a burst: the hit is the envelope
-        cloud(ctx, a, t, bus, { count: density * 2, spread: 0.16 * dec, grain: lerp(0.06, 0.11, w), rate: lerp(1.1, 0.7, w), centre: lerp(1300, 600, w), q: 1.6, peak: 0.34 + 0.17 * w, decay: 1.4, seed })
+        cloud(ctx, a, t, bus, { count: density * 2, spread: 0.09 * dec, grain: lerp(0.022, 0.05, w), rate: lerp(1.4, 0.8, w), centre: lerp(1800, 800, w), q: 2.4, peak: 0.34 + 0.17 * w, decay: 1.9, seed })
         sub(ctx, t, 62 * tune, n.out, 0.15 * w * h.velocity, 0.24 * dec)
         break
       case 'hat':
-        cloud(ctx, a, t, bus, { count: Math.max(3, density >> 1), spread: 0.05, grain: lerp(0.02, 0.04, w), rate: lerp(2, 1.2, w), centre: lerp(4800, 2600, w), q: 2.6, peak: 0.22 + 0.11 * w, decay: 2, seed })
+        cloud(ctx, a, t, bus, { count: Math.max(3, density >> 1), spread: 0.025, grain: lerp(0.008, 0.02, w), rate: lerp(2.6, 1.4, w), centre: lerp(7200, 3600, w), q: 4, peak: 0.22 + 0.11 * w, decay: 2.4, seed })
         break
       case 'perc': {
-        // a loop fragment rather than a click: filtered until only shape is left
-        const s = source(ctx, a.vinyl, t, ((h.turn * 0.37 + h.step * 0.11) % 3) + 0.2, lerp(0.8, 1.1, m.grit))
+        // the click first — a single impulse through a narrow band — and the
+        // loop fragment behind it
+        const s2 = source(ctx, a.noise, t, 0.2 + h.step * 0.03)
+        const bp2 = ctx.createBiquadFilter()
+        bp2.type = 'bandpass'
+        bp2.frequency.value = safeParam(lerp(900, 5200, (h.spiral * 3) % 1), 200, 9000, 1500)
+        bp2.Q.value = 16
+        const cg = percEnv(ctx, t, { attack: 0.0003, decay: 0.02 * dec, peak: 0.42, curve: 5 })
+        s2.connect(bp2).connect(cg).connect(bus)
+        s2.stop(t + 0.2)
+        const s3 = source(ctx, a.vinyl, t + 0.006, ((h.turn * 0.37 + h.step * 0.11) % 3) + 0.2, lerp(0.85, 1.15, m.grit))
         const bp = ctx.createBiquadFilter()
         bp.type = 'bandpass'
-        bp.frequency.setValueAtTime(safeParam(lerp(500, 2400, (h.spiral * 3) % 1), 100, 6000, 900), t)
-        bp.frequency.exponentialRampToValueAtTime(safeParam(lerp(300, 900, (h.spiral * 3) % 1), 100, 6000, 500), t + 0.2 * dec)
-        bp.Q.value = 3.5
-        const g = percEnv(ctx, t, { attack: 0.006, decay: 0.12 * dec, peak: 0.42, curve: 2.6 })
-        s.connect(bp).connect(g).connect(bus)
-        s.stop(t + 0.6 * dec)
-        cloud(ctx, a, t + 0.01, bus, { count: 6, spread: 0.16 * dec, grain: 0.08, rate: 0.85, centre: 900, q: 1, peak: 0.14, decay: 1.2, seed: seed + 1 })
+        bp.frequency.value = safeParam(lerp(700, 2600, (h.spiral * 3) % 1), 150, 7000, 1100)
+        bp.Q.value = 3
+        const g = percEnv(ctx, t + 0.006, { attack: 0.004, decay: 0.08 * dec, peak: 0.3, curve: 3 })
+        s3.connect(bp).connect(g).connect(bus)
+        s3.stop(t + 0.4 * dec)
+        cloud(ctx, a, t + 0.01, bus, { count: 6, spread: 0.12 * dec, grain: 0.05, rate: 0.9, centre: 1200, q: 1.2, peak: 0.14, decay: 1.2, seed: seed + 1 })
         break
       }
       case 'air':
@@ -629,7 +621,7 @@ const grain: Kit = {
 const liquid: Kit = {
   id: 'liquid',
   kickTrim: 1.9,
-  trim: 0.72,
+  trim: 1.0,
   name: 'PULSE / Ryoji Ikeda',
   description: 'After Ikeda: sine test tones, single-sample impulses, gated noise and silence as an event. Nothing smeared, nothing warmed.',
   voice(h, t, n, a, m) {

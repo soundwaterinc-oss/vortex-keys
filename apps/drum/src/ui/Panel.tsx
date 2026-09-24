@@ -74,9 +74,10 @@ export function Panel() {
         <Slider label="MASS↻" value={s.spiral.mass} format={pct} onChange={(v) => spiral({ mass: v })} />
         <Slider label="GATE↻" value={s.spiral.gate} format={pct} onChange={(v) => spiral({ gate: v })} />
         <Slider label="DENSITY" value={s.spiral.density} format={pct} onChange={(v) => spiral({ density: v })} />
+        <Slider label="ROLL" value={s.spiral.roll} format={pct} onChange={(v) => spiral({ roll: v })} />
         <Slider label="ROTATE" value={s.spiral.rotate} min={-4} max={4} step={1} format={(v) => `${v > 0 ? '+' : ''}${v} st/turn`} onChange={(v) => spiral({ rotate: v })} />
-        <Slider label="TURNS" value={s.spiral.turns} min={1} max={6} step={1} format={(v) => String(v)} onChange={(v) => spiral({ turns: v })} />
-        <Slider label="GRID" value={s.spiral.stepsPerTurn} min={8} max={24} step={4} format={(v) => `${v}/bar`} onChange={(v) => spiral({ stepsPerTurn: v })} />
+        <Slider label="TURNS" value={s.spiral.turns} min={1} max={8} step={1} format={(v) => String(v)} onChange={(v) => spiral({ turns: v })} />
+        <Slider label="GRID" value={s.spiral.stepsPerTurn} min={8} max={48} step={4} format={(v) => `${v}/bar`} onChange={(v) => spiral({ stepsPerTurn: v })} />
         <Slider label="SEED" value={s.spiral.seed} min={0} max={999} step={1} format={(v) => String(v)} onChange={(v) => spiral({ seed: v })} />
       </Section>
 
