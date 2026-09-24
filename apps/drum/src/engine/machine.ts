@@ -73,6 +73,10 @@ export class Machine {
   private duckSend: GainNode | null = null
   /** clears the low end out of the non-kick tracks so the kick owns it */
   private bodyHP: BiquadFilterNode | null = null
+  /** tempo-synced ping-pong delay: a rhythmic send, not a room */
+  private echoIn: GainNode | null = null
+  private echoL: DelayNode | null = null
+  private echoR: DelayNode | null = null
   /** GRIND: parallel shaping + ring modulation on each bus */
   private bodyGrind: GrindStage | null = null
   private kickGrind: GrindStage | null = null
@@ -114,7 +118,10 @@ export class Machine {
       this.chain.setMasterGain(0.1 + 0.26 * this.state.macros.level)
       this.applyPunch()
     }
-    if (p.bpm && this.clock) this.clock.bpm = this.state.bpm
+    if (p.bpm && this.clock) {
+      this.clock.bpm = this.state.bpm
+      this.applyEchoTime()
+    }
     this.emit()
   }
 
@@ -162,6 +169,14 @@ export class Machine {
       g.gain.linearRampToValueAtTime(Math.max(0.05, 1 - depth), t + 0.006)
       g.gain.setTargetAtTime(1, t + 0.012, release / 3)
     }
+  }
+
+  /** Keep the echo taps on the grid whenever the tempo changes. */
+  private applyEchoTime() {
+    const beat = 60 / this.state.bpm
+    const t = this.ctx?.currentTime ?? 0
+    this.echoL?.delayTime.setTargetAtTime(beat * 0.75, t, 0.05)
+    this.echoR?.delayTime.setTargetAtTime(beat * 0.5, t, 0.05)
   }
 
   private applyTrim() {
@@ -229,6 +244,31 @@ export class Machine {
       this.bodyHP.Q.value = 0.7
       this.duckDry = ctx.createGain()
       this.duckSend = ctx.createGain()
+      // ── ping-pong echo ─────────────────────────────────────────
+      // taps at a dotted eighth and an eighth, crossed, so the repeats walk
+      // across the stereo field and land on the grid
+      this.echoIn = ctx.createGain()
+      this.echoL = ctx.createDelay(4)
+      this.echoR = ctx.createDelay(4)
+      const fbL = ctx.createGain()
+      const fbR = ctx.createGain()
+      fbL.gain.value = 0.42
+      fbR.gain.value = 0.42
+      const echoLP = ctx.createBiquadFilter()
+      echoLP.type = 'lowpass'
+      echoLP.frequency.value = 3600
+      const panL = ctx.createStereoPanner()
+      const panR = ctx.createStereoPanner()
+      panL.pan.value = -0.75
+      panR.pan.value = 0.75
+      this.echoIn.connect(this.echoL)
+      this.echoL.connect(echoLP)
+      echoLP.connect(fbR).connect(this.echoR)
+      this.echoR.connect(fbL).connect(this.echoL)
+      this.echoL.connect(panL).connect(this.chain.input)
+      this.echoR.connect(panR).connect(this.chain.input)
+      this.applyEchoTime()
+
       this.weightShelf = ctx.createBiquadFilter()
       this.weightShelf.type = 'lowshelf'
       this.weightShelf.frequency.value = 160
@@ -241,7 +281,7 @@ export class Machine {
       this.kitSend.connect(this.duckSend).connect(this.chain.send)
       this.applyTrim()
       this.applyPunch()
-      this.nodes = { ctx, out: this.kitDry, send: this.kitSend, punch: this.punchBus }
+      this.nodes = { ctx, out: this.kitDry, send: this.kitSend, punch: this.punchBus, echo: this.echoIn }
       this.clock = new SourceClock(() => ctx.currentTime, this.state.bpm)
       this.runner = new FixedStepRunner(this.clock, () => {}, { dt: 1 / 60, lookahead: LOOKAHEAD, maxCatchUp: 0.5 })
       this.cursor = 0
@@ -294,12 +334,22 @@ export class Machine {
       // the grid itself stays honest: swing and warp are offsets, not drift
       const bar = ((this.cursor % cfg.stepsPerTurn) + cfg.stepsPerTurn) % cfg.stepsPerTurn
       const base = this.cursorTime + swingOffset(bar, this.state.swing, stepSec)
+      const kit = KITS[this.state.kit]
       for (const h of hitsAt(this.pattern, this.cursor, cfg)) {
         if (this.state.mutes[h.track]) continue
         // each track rides the warp axis with its own lean, so they pull
         // apart and back together instead of sliding as a block
-        const at = Math.max(ctx.currentTime, base + h.warp * stepSec * 0.5)
-        this.voice(h, at)
+        let offset = h.warp * stepSec * 0.5
+        // the kit's own feel: a fixed lean per track, then a seeded wander
+        offset += (kit.timing?.[h.track] ?? 0) * stepSec
+        let velocity = h.velocity
+        if (kit.humanize) {
+          const r = createPrng(this.state.spiral.seed * 17 + this.cursor * 131 + TRACKS.indexOf(h.track) * 7919)
+          offset += r.signed() * kit.humanize * stepSec * 0.16
+          velocity = clamp(velocity * (1 - kit.humanize * 0.3 * r.next()), 0.05, 1)
+        }
+        const at = Math.max(ctx.currentTime, base + offset)
+        this.voice({ ...h, velocity }, at)
       }
       this.cursor++
       this.cursorTime += stepSec
