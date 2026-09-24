@@ -1,4 +1,4 @@
-import { TRACKS, turnPattern, type SpiralConfig, type Pattern, type TrackId } from '../engine/pattern'
+import { axesAt, TRACKS, trackLength, turnPattern, type SpiralConfig, type Pattern, type TrackId } from '../engine/pattern'
 import type { MachineState, Snapshot } from '../engine/machine'
 
 /**
@@ -92,12 +92,19 @@ export function render(ctx: CanvasRenderingContext2D, v: View) {
     ctx.stroke()
   }
 
-  // ---- steps, turn by turn ----
-  // cache each turn's transformed pattern once per frame
-  const turned: Record<number, Partial<Record<TrackId, number[]>>> = {}
-  for (let turn = 0; turn < cfg.turns; turn++) {
-    turned[turn] = {}
-    for (const t of TRACKS) turned[turn][t] = turnPattern(v.pattern[t], t, turn, cfg)
+  // ---- steps ----
+  // Each cell of the spiral is a global step index; a track reads it through
+  // its own cycle length, so a polymetric track visibly walks around the
+  // spiral instead of sitting on one ray.
+  const cache = new Map<string, number[]>()
+  const rowFor = (t: TrackId, trackTurn: number) => {
+    const key = `${t}:${trackTurn}`
+    let r = cache.get(key)
+    if (!r) {
+      const len = trackLength(t, cfg)
+      cache.set(key, (r = turnPattern(v.pattern[t].slice(0, len), t, trackTurn, cfg)))
+    }
+    return r
   }
 
   const flash = new Map<string, number>()
@@ -110,16 +117,22 @@ export function render(ctx: CanvasRenderingContext2D, v: View) {
 
   for (let turn = 0; turn < cfg.turns; turn++) {
     for (const t of TRACKS) {
-      const row = turned[turn][t]!
       const muted = state.mutes[t]
       const editing = t === state.editing
       const hue = HUE[t]
+      const len = trackLength(t, cfg)
       for (let s = 0; s < cfg.stepsPerTurn; s++) {
-        const val = row[s]
-        const base = v.pattern[t][s]
+        const idx = turn * cfg.stepsPerTurn + s
+        const localStep = ((idx % len) + len) % len
+        const trackTurn = Math.floor(idx / len)
+        const val = rowFor(t, trackTurn)[localStep] ?? 0
+        const base = v.pattern[t][localStep] ?? 0
+        const ax = axesAt(idx, cfg)
+        // the warp axis moves the dot off its ray, so the timing you hear is
+        // the timing you see
         const r = g.trackRadius(turn, t)
-        const [x, y] = g.xy(r, g.angle(s))
-        const hot = flash.get(`${t}:${turn}:${s}`) ?? 0
+        const [x, y] = g.xy(r, g.angle(s + ax.warp * (t === 'kick' ? 0.25 : t === 'sub' ? 0.5 : 1) * 0.5))
+        const hot = flash.get(`${t}:${trackTurn}:${localStep}`) ?? 0
         if (hot > 0) {
           const rad = 3 + 9 * hot * val
           const grd = ctx.createRadialGradient(x, y, 0, x, y, rad)
@@ -131,8 +144,8 @@ export function render(ctx: CanvasRenderingContext2D, v: View) {
           ctx.fill()
         }
         if (val <= 0) {
-          // only draw the empty grid on the turn being edited, to keep it readable
-          if (turn === 0 && editing) {
+          // only draw the empty grid on the first cycle being edited, to keep it readable
+          if (idx < len && editing) {
             ctx.fillStyle = 'rgba(255,255,255,0.12)'
             ctx.beginPath()
             ctx.arc(x, y, 1.2, 0, TAU)
@@ -141,13 +154,15 @@ export function render(ctx: CanvasRenderingContext2D, v: View) {
           continue
         }
         const drifted = base <= 0 || Math.abs(val - base) > 0.02
+        // the fold axis colours the dot: more distortion, more saturated
+        const sat = 55 + 40 * ax.fold
         const size = 1.6 + 2.6 * val
         ctx.globalAlpha = muted ? 0.25 : 1
-        ctx.fillStyle = `hsla(${hue},${drifted ? 60 : 85}%,${drifted ? 52 : 66}%,${editing ? 0.95 : 0.6})`
+        ctx.fillStyle = `hsla(${hue + ax.bend * 0.03},${drifted ? sat * 0.75 : sat}%,${drifted ? 52 : 66}%,${editing ? 0.95 : 0.6})`
         ctx.beginPath()
         ctx.arc(x, y, size, 0, TAU)
         ctx.fill()
-        if (drifted && turn > 0) {
+        if (drifted && trackTurn > 0) {
           // a ring marks a note the spiral moved or invented
           ctx.strokeStyle = `hsla(${hue},70%,70%,0.35)`
           ctx.lineWidth = 0.8
@@ -163,6 +178,7 @@ export function render(ctx: CanvasRenderingContext2D, v: View) {
   // ---- hover ----
   if (v.hover) {
     const [x, y] = g.xy(g.trackRadius(0, v.hover.track), g.angle(v.hover.step))
+    ctx.lineWidth = 1
     ctx.strokeStyle = `hsla(${HUE[v.hover.track]},90%,75%,0.8)`
     ctx.lineWidth = 1
     ctx.beginPath()
@@ -202,7 +218,9 @@ export function render(ctx: CanvasRenderingContext2D, v: View) {
   }
   ctx.textAlign = 'left'
   ctx.fillStyle = 'rgba(255,255,255,0.3)'
-  ctx.fillText(`turn ${snap.turn + 1}/${cfg.turns}`, 12, h - 14)
+  const lengths = TRACKS.map((t) => trackLength(t, cfg))
+  const same = lengths.every((l) => l === lengths[0])
+  ctx.fillText(`turn ${snap.turn + 1}/${cfg.turns}${same ? '' : `  ·  cycles ${lengths.join('/')}`}`, 12, h - 14)
 }
 
 /** Which step a pointer is over, if any. */
@@ -214,6 +232,9 @@ export function pick(x: number, y: number, w: number, h: number, cfg: SpiralConf
   if (r < g.r0 * 0.6 || r > g.r1 + 6) return null
   let a = Math.atan2(dy, dx) + Math.PI / 2
   a = ((a % TAU) + TAU) % TAU
-  const step = Math.round((a / TAU) * cfg.stepsPerTurn) % cfg.stepsPerTurn
+  // a click lands on the edited track's own cycle, which may be shorter than
+  // the bar, so the step wraps into the pattern the track actually reads
+  const len = trackLength(editing, cfg)
+  const step = Math.round((a / TAU) * cfg.stepsPerTurn) % len
   return { track: editing, step }
 }

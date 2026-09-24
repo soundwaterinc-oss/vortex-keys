@@ -43,8 +43,12 @@ export function Panel() {
           }}
         />
         <p className="hint">{kit.description}</p>
-        <p className="hint">PUNCH hardens the beater, shortens the body, lifts the low end out of the other tracks and deepens the duck under every kick.</p>
+        <p className="hint">
+          WEIGHT puts a sub layer under every voice, lengthens the bodies and lifts the low end. PUNCH hardens the beater, shortens the
+          body and deepens the duck under every kick.
+        </p>
         <Slider label="TUNE" value={s.macros.tune} min={-12} max={12} step={0.5} format={semi} onChange={(v) => macro('tune', v)} />
+        <Slider label="WEIGHT" value={s.macros.weight} format={pct} big onChange={(v) => macro('weight', v)} />
         <Slider label="PUNCH" value={s.macros.punch} format={pct} big onChange={(v) => macro('punch', v)} />
         <Slider label="GRIT" value={s.macros.grit} format={pct} onChange={(v) => macro('grit', v)} />
         <Slider label="DECAY" value={s.macros.decay} format={pct} onChange={(v) => macro('decay', v)} />
@@ -54,10 +58,15 @@ export function Panel() {
 
       <Section title="SPIRAL">
         <p className="hint">
-          The playhead never repeats a circle: it spirals out for {s.spiral.turns} turns, and each turn rotates, thins and tilts the figure
-          before it comes back.
+          Five axes turning at once, none of them in step: the figure drifts and rotates over {s.spiral.turns} turns (DRIFT, ROTATE), each
+          track runs its own cycle length (POLY), and timing, pitch and distortion swing on periods of 3, 5 and 7 turns (WARP, BEND, FOLD).
+          They only all line up again after a very long time.
         </p>
         <Slider label="DRIFT" value={s.spiral.drift} format={pct} big onChange={(v) => spiral({ drift: v })} />
+        <Slider label="POLY" value={s.spiral.poly} format={pct} big onChange={(v) => spiral({ poly: v })} />
+        <Slider label="WARP" value={s.spiral.warp} format={pct} onChange={(v) => spiral({ warp: v })} />
+        <Slider label="BEND" value={s.spiral.bend} format={pct} onChange={(v) => spiral({ bend: v })} />
+        <Slider label="FOLD" value={s.spiral.fold} format={pct} onChange={(v) => spiral({ fold: v })} />
         <Slider label="DENSITY" value={s.spiral.density} format={pct} onChange={(v) => spiral({ density: v })} />
         <Slider label="ROTATE" value={s.spiral.rotate} min={-4} max={4} step={1} format={(v) => `${v > 0 ? '+' : ''}${v} st/turn`} onChange={(v) => spiral({ rotate: v })} />
         <Slider label="TURNS" value={s.spiral.turns} min={1} max={6} step={1} format={(v) => String(v)} onChange={(v) => spiral({ turns: v })} />

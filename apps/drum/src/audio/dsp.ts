@@ -100,6 +100,24 @@ export function bitCurve(bits: number, n = 2048): Float32Array<ArrayBuffer> {
   return c
 }
 
+/**
+ * Wavefolder. Past unity the curve folds back instead of clipping, which
+ * adds high harmonics without the flat top of a clipper — heavy, but it
+ * keeps a sense of movement as the drive changes.
+ */
+export function foldCurve(amount: number, n = 2048): Float32Array<ArrayBuffer> {
+  const c = new Float32Array(new ArrayBuffer(n * 4))
+  const k = 1 + amount * 3.5
+  for (let i = 0; i < n; i++) {
+    const x = ((i / (n - 1)) * 2 - 1) * k
+    // triangle fold: reflect the signal backevery time it passes ±1
+    let y = ((x + 1) % 4 + 4) % 4
+    y = y > 2 ? 4 - y : y
+    c[i] = (y - 1) * 0.85
+  }
+  return c
+}
+
 export interface EnvOptions {
   attack: number
   decay: number

@@ -38,20 +38,92 @@ export interface SpiralConfig {
   rotate: number
   /** 0..1 — scales every trigger probability */
   density: number
+  /**
+   * 0..1 — how far the tracks' cycle lengths pull apart. At 0 every track
+   * turns with the bar; above it each one gets its own length, so the tracks
+   * precess against each other and the whole figure only closes after their
+   * common multiple. This is the second spiral axis.
+   */
+  poly: number
+  /** 0..1 — micro-timing warp; a third axis, period 3 turns */
+  warp: number
+  /** 0..1 — pitch bend along a fourth axis, period 5 turns */
+  bend: number
+  /** 0..1 — distortion along a fifth axis, period 7 turns */
+  fold: number
   seed: number
 }
 
-export const DEFAULT_SPIRAL: SpiralConfig = { stepsPerTurn: 16, turns: 4, drift: 0.35, rotate: 1, density: 0.85, seed: 7 }
+export const DEFAULT_SPIRAL: SpiralConfig = {
+  stepsPerTurn: 16,
+  turns: 4,
+  drift: 0.35,
+  rotate: 1,
+  density: 0.85,
+  poly: 0.45,
+  warp: 0.35,
+  bend: 0.3,
+  fold: 0.4,
+  seed: 7,
+}
+
+/**
+ * The axes are deliberately incommensurate: 3, 5 and 7 turns against the
+ * pattern's own turn and the tracks' own lengths. Nothing lines up twice
+ * inside any reasonable performance, which is what keeps the spiral from
+ * reading as one rotating wheel.
+ */
+const AXIS_TURNS = { warp: 3, bend: 5, fold: 7 } as const
+/** how each track's cycle length is pulled off the bar at poly = 1 */
+const POLY_OFFSET: Record<TrackId, number> = { kick: 0, sub: -1, snare: 1, hat: -3, perc: 3, air: -5 }
+
+/**
+ * A track's own cycle length in steps. KICK always holds the bar — the
+ * ground has to stay where it is for the drift to be audible as drift.
+ */
+export function trackLength(track: TrackId, cfg: SpiralConfig): number {
+  const off = Math.round(POLY_OFFSET[track] * cfg.poly)
+  return Math.max(4, cfg.stepsPerTurn + off)
+}
+
+export interface Axes {
+  /** micro-timing, in fractions of a step (±) */
+  warp: number
+  /** pitch, in cents (±) */
+  bend: number
+  /** extra distortion, 0..1 */
+  fold: number
+}
+
+/** The three continuous axes at one point of the spiral. */
+export function axesAt(globalIndex: number, cfg: SpiralConfig): Axes {
+  const turnPos = globalIndex / Math.max(1, cfg.stepsPerTurn)
+  const ph = (period: number, phase = 0) => Math.sin((turnPos / period) * Math.PI * 2 + phase)
+  return {
+    // two warp components a fifth apart in period, so the push and pull
+    // themselves drift in and out of phase
+    warp: cfg.warp * 0.5 * (ph(AXIS_TURNS.warp) * 0.7 + ph(AXIS_TURNS.warp * 1.5, 1.1) * 0.3),
+    bend: cfg.bend * 140 * ph(AXIS_TURNS.bend),
+    fold: cfg.fold * (0.5 + 0.5 * ph(AXIS_TURNS.fold, 0.6)),
+  }
+}
 
 /** A step that actually sounds, with everything a kit needs to voice it. */
 export interface Hit {
   track: TrackId
-  /** index within the turn */
+  /** index within the track's own cycle */
   step: number
+  /** the track's own turn count, which is not the bar count once poly > 0 */
   turn: number
   velocity: number
   /** 0..1 position along the whole spiral — kits use it to morph timbre */
   spiral: number
+  /** micro-timing offset in fractions of a step */
+  warp: number
+  /** detune in cents */
+  bend: number
+  /** extra distortion, 0..1 */
+  fold: number
 }
 
 const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v)
@@ -108,18 +180,38 @@ export function turnPattern(base: TrackPattern, track: TrackId, turn: number, cf
   return out
 }
 
-/** Everything that sounds on one step of one turn. */
-export function hitsAt(pattern: Pattern, step: number, turn: number, cfg: SpiralConfig): Hit[] {
+/**
+ * Everything that sounds at one point of the spiral.
+ *
+ * `globalIndex` counts steps from the start; each track reads it through its
+ * own cycle length, so the tracks sit on different turns at the same moment.
+ */
+export function hitsAt(pattern: Pattern, globalIndex: number, cfg: SpiralConfig): Hit[] {
   const hits: Hit[] = []
   const total = Math.max(1, cfg.stepsPerTurn * cfg.turns)
-  const spiral = (turn * cfg.stepsPerTurn + step) / total
+  const spiral = (((globalIndex % total) + total) % total) / total
+  const ax = axesAt(globalIndex, cfg)
   for (const track of TRACKS) {
-    const v = turnPattern(pattern[track], track, turn, cfg)[step]
-    if (v <= 0) continue
+    const len = trackLength(track, cfg)
+    const step = ((globalIndex % len) + len) % len
+    const turn = Math.floor(globalIndex / len)
+    const v = turnPattern(pattern[track].slice(0, len), track, turn, cfg)[step]
+    if (!v || v <= 0) continue
     // density thins the spiral out without editing the pattern
     const gate = createPrng(cfg.seed * 31 + turn * 613 + step * 17 + TRACKS.indexOf(track)).next()
     if (gate > cfg.density) continue
-    hits.push({ track, step, turn, velocity: clamp01(v), spiral })
+    // the axes lean on the tracks differently: the ground bends least
+    const lean = track === 'kick' ? 0.25 : track === 'sub' ? 0.5 : 1
+    hits.push({
+      track,
+      step,
+      turn,
+      velocity: clamp01(v),
+      spiral,
+      warp: ax.warp * lean,
+      bend: ax.bend * lean,
+      fold: ax.fold,
+    })
   }
   return hits
 }

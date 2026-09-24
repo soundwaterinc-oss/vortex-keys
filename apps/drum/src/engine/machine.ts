@@ -21,7 +21,7 @@ export interface MachineState {
   bpm: number
   playing: boolean
   swing: number
-  macros: { tune: number; grit: number; decay: number; space: number; level: number; punch: number }
+  macros: { tune: number; grit: number; decay: number; space: number; level: number; punch: number; weight: number }
   spiral: SpiralConfig
   /** which track the spiral canvas edits */
   editing: TrackId
@@ -48,7 +48,7 @@ export function defaultState(): MachineState {
     bpm: 124,
     playing: false,
     swing: 0.12,
-    macros: { tune: 0, grit: 0.45, decay: 0.5, space: 0.5, level: 0.8, punch: 0.7 },
+    macros: { tune: 0, grit: 0.45, decay: 0.5, space: 0.5, level: 0.8, punch: 0.75, weight: 0.8 },
     spiral: { ...DEFAULT_SPIRAL },
     editing: 'kick',
     mutes: { kick: false, sub: false, snare: false, hat: false, perc: false, air: false },
@@ -72,6 +72,9 @@ export class Machine {
   private duckSend: GainNode | null = null
   /** clears the low end out of the non-kick tracks so the kick owns it */
   private bodyHP: BiquadFilterNode | null = null
+  /** WEIGHT: a low shelf on the whole kit and a deeper lift on the kick bus */
+  private weightShelf: BiquadFilterNode | null = null
+  private punchShelf: BiquadFilterNode | null = null
   private clock: SourceClock | null = null
   private runner: FixedStepRunner | null = null
   private timer: number | null = null
@@ -104,7 +107,7 @@ export class Machine {
     if (p.kit && p.kit !== prev.kit) this.applyTrim()
     if (p.macros && this.chain) {
       this.chain.setSpace(this.state.macros.space)
-      this.chain.setMasterGain(0.35 + 0.45 * this.state.macros.level)
+      this.chain.setMasterGain(0.1 + 0.26 * this.state.macros.level)
       this.applyPunch()
     }
     if (p.bpm && this.clock) this.clock.bpm = this.state.bpm
@@ -117,8 +120,13 @@ export class Machine {
    */
   private applyPunch() {
     const p = this.state.macros.punch
+    const w = this.state.macros.weight
     const t = this.ctx?.currentTime ?? 0
-    this.bodyHP?.frequency.setTargetAtTime(lerp(45, 190, p), t, 0.05)
+    // WEIGHT lets the body keep more of its low end even at high PUNCH:
+    // heavy needs the other tracks to have bodies too, just out of the way
+    this.bodyHP?.frequency.setTargetAtTime(lerp(45, 190, p) * lerp(1, 0.55, w), t, 0.05)
+    this.weightShelf?.gain.setTargetAtTime(lerp(0, 4, w), t, 0.05)
+    this.punchShelf?.gain.setTargetAtTime(lerp(3, 6, w), t, 0.05)
     this.punchBus?.gain.setTargetAtTime(lerp(1.1, 1.9, p) * KITS[this.state.kit].kickTrim, t, 0.05)
   }
 
@@ -168,7 +176,7 @@ export class Machine {
       this.ctx = ctx
       this.chain = new MasterChain(ctx, { delaySeconds: 0.42, delayFeedback: 0.45, reverbSeconds: 2.6, reverbDecay: 2.2 })
       this.chain.setSpace(this.state.macros.space)
-      this.chain.setMasterGain(0.35 + 0.45 * this.state.macros.level)
+      this.chain.setMasterGain(0.1 + 0.26 * this.state.macros.level)
       this.assets = new KitAssets(ctx)
 
       // ── kick path ──────────────────────────────────────────────
@@ -182,9 +190,9 @@ export class Machine {
       // physical on speakers that cannot reproduce the fundamental at all
       const punchShelf = ctx.createBiquadFilter()
       punchShelf.type = 'peaking'
-      punchShelf.frequency.value = 72
-      punchShelf.Q.value = 0.9
-      punchShelf.gain.value = 4.5
+      punchShelf.frequency.value = 64
+      punchShelf.Q.value = 0.8
+      this.punchShelf = punchShelf
       this.punchBus.connect(punchSat).connect(punchShelf).connect(this.chain.input)
 
       // ── everything else ────────────────────────────────────────
@@ -196,7 +204,10 @@ export class Machine {
       this.bodyHP.Q.value = 0.7
       this.duckDry = ctx.createGain()
       this.duckSend = ctx.createGain()
-      this.kitDry.connect(this.bodyHP).connect(this.duckDry).connect(this.chain.input)
+      this.weightShelf = ctx.createBiquadFilter()
+      this.weightShelf.type = 'lowshelf'
+      this.weightShelf.frequency.value = 160
+      this.kitDry.connect(this.bodyHP).connect(this.weightShelf).connect(this.duckDry).connect(this.chain.input)
       this.kitSend.connect(this.duckSend).connect(this.chain.send)
       this.applyTrim()
       this.applyPunch()
@@ -247,16 +258,17 @@ export class Machine {
     }
     const horizon = ctx.currentTime + LOOKAHEAD
     const cfg = this.state.spiral
-    const total = Math.max(1, cfg.stepsPerTurn * cfg.turns)
     let guard = 0
     while (this.cursorTime < horizon && guard++ < 64) {
-      const idx = ((this.cursor % total) + total) % total
-      const step = idx % cfg.stepsPerTurn
-      const turn = Math.floor(idx / cfg.stepsPerTurn)
       const stepSec = this.stepSeconds()
-      const at = this.cursorTime + swingOffset(step, this.state.swing, stepSec)
-      for (const h of hitsAt(this.pattern, step, turn, cfg)) {
+      // the grid itself stays honest: swing and warp are offsets, not drift
+      const bar = ((this.cursor % cfg.stepsPerTurn) + cfg.stepsPerTurn) % cfg.stepsPerTurn
+      const base = this.cursorTime + swingOffset(bar, this.state.swing, stepSec)
+      for (const h of hitsAt(this.pattern, this.cursor, cfg)) {
         if (this.state.mutes[h.track]) continue
+        // each track rides the warp axis with its own lean, so they pull
+        // apart and back together instead of sliding as a block
+        const at = Math.max(ctx.currentTime, base + h.warp * stepSec * 0.5)
         this.voice(h, at)
       }
       this.cursor++
@@ -271,7 +283,17 @@ export class Machine {
   private voice(h: Hit, t: number) {
     const kit = KITS[this.state.kit]
     const m = this.state.macros
-    const macros: KitMacros = { tune: m.tune, grit: m.grit, decay: m.decay, space: m.space, punch: m.punch, spiral: h.spiral }
+    const macros: KitMacros = {
+      tune: m.tune,
+      grit: m.grit,
+      decay: m.decay,
+      space: m.space,
+      punch: m.punch,
+      weight: m.weight,
+      bend: h.bend,
+      fold: h.fold,
+      spiral: h.spiral,
+    }
     // the kick drives the sidechain, so it must duck before it sounds
     if (h.track === 'kick') this.duck(t, h.velocity)
     try {
