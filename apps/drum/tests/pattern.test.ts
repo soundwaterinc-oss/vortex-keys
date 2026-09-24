@@ -72,7 +72,7 @@ describe('spiral pattern', () => {
   it('hits carry their position along the whole spiral', () => {
     const p = emptyPattern(16)
     p.kick[0] = 1
-    const c = { ...cfg, drift: 0, rotate: 0, density: 1, turns: 4, poly: 0 }
+    const c = { ...cfg, drift: 0, rotate: 0, density: 1, turns: 4, poly: 0, gate: 0 }
     expect(hitsAt(p, 0, c)[0].spiral).toBe(0)
     expect(hitsAt(p, 32, c)[0].spiral).toBeCloseTo(0.5, 5)
   })
@@ -105,7 +105,7 @@ describe('spiral pattern', () => {
   it('a polymetric track precesses: the same note falls on a different step each bar', () => {
     const p = emptyPattern(16)
     p.hat[0] = 1
-    const c = { ...cfg, drift: 0, rotate: 0, density: 1, poly: 1 }
+    const c = { ...cfg, drift: 0, rotate: 0, density: 1, poly: 1, gate: 0 }
     const len = trackLength('hat', c)
     expect(len).not.toBe(16)
     // it sounds every `len` steps, so against a 16-step bar it walks
@@ -133,7 +133,7 @@ describe('spiral pattern', () => {
     const p = emptyPattern(16)
     p.kick[4] = 1
     p.perc[4] = 1
-    const c = { ...cfg, drift: 0, rotate: 0, density: 1, poly: 0, bend: 1, warp: 1 }
+    const c = { ...cfg, drift: 0, rotate: 0, density: 1, poly: 0, bend: 1, warp: 1, gate: 0 }
     // step 4 of some turn where the bend axis is away from zero
     for (let i = 4; i < 16 * 8; i += 16) {
       const hs = hitsAt(p, i, c)
@@ -146,6 +146,44 @@ describe('spiral pattern', () => {
       }
     }
     throw new Error('no turn found with an active bend axis')
+  })
+
+  it('the gate axis opens and closes the spiral without editing the pattern', () => {
+    const p = emptyPattern(16)
+    for (let i = 0; i < 16; i++) p.hat[i] = 1
+    const count = (c: typeof cfg) => {
+      let n = 0
+      for (let i = 0; i < 16 * 13; i++) if (hitsAt(p, i, c).some((h) => h.track === 'hat')) n++
+      return n
+    }
+    const open = count({ ...cfg, drift: 0, density: 1, gate: 0 })
+    const breathing = count({ ...cfg, drift: 0, density: 1, gate: 1 })
+    expect(open).toBe(16 * 13)
+    expect(breathing).toBeLessThan(open * 0.8)
+    expect(breathing).toBeGreaterThan(0)
+  })
+
+  it('each track reads the axes from its own phase, so no axis moves the kit as a block', () => {
+    const c = { ...cfg, grind: 1, mass: 1 }
+    const a = axesAt(40, c, 'kick')
+    const b = axesAt(40, c, 'hat')
+    expect(Math.abs(a.grind - b.grind)).toBeGreaterThan(0.01)
+    expect(Math.abs(a.mass - b.mass)).toBeGreaterThan(0.01)
+    // the kick is the reference: its phase offset is zero, so it reads the
+    // bare axis while every other track is displaced from it
+    expect(axesAt(40, c).grind).toBe(a.grind)
+    expect(axesAt(40, c).grind).not.toBe(b.grind)
+  })
+
+  it('the new axes turn on their own long periods', () => {
+    const c = { ...cfg, grind: 1, mass: 1, gate: 1 }
+    const at = (turn: number) => axesAt(turn * c.stepsPerTurn, c)
+    expect(at(11).grind).toBeCloseTo(at(0).grind, 5)
+    expect(at(13).mass).toBeCloseTo(at(0).mass, 5)
+    expect(at(6.5).gate).toBeCloseTo(at(0).gate, 5)
+    // and they are nowhere near each other in between
+    expect(Math.abs(at(11).mass - at(0).mass)).toBeGreaterThan(0.1)
+    expect(Math.abs(at(13).grind - at(0).grind)).toBeGreaterThan(0.05)
   })
 
   it('every factory kit seeds a playable figure', () => {

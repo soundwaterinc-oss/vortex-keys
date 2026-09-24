@@ -101,21 +101,104 @@ export function bitCurve(bits: number, n = 2048): Float32Array<ArrayBuffer> {
 }
 
 /**
- * Wavefolder. Past unity the curve folds back instead of clipping, which
- * adds high harmonics without the flat top of a clipper — heavy, but it
- * keeps a sense of movement as the drive changes.
+ * Wavefolder with teeth.
+ *
+ * `amount` folds: past unity the curve reflects instead of clipping, which
+ * adds high harmonics while keeping a sense of movement as the drive changes.
+ * `grit` then bites into that fold — it quantises the curve to fewer and
+ * fewer levels and drives the negative half harder than the positive one.
+ * Steps give the buzz, asymmetry gives the even harmonics, and together they
+ * are what makes a sound gritty rather than merely loud.
  */
-export function foldCurve(amount: number, n = 2048): Float32Array<ArrayBuffer> {
+export function foldCurve(amount: number, grit = 0, n = 2048): Float32Array<ArrayBuffer> {
   const c = new Float32Array(new ArrayBuffer(n * 4))
-  const k = 1 + amount * 3.5
+  const k = 1 + amount * 3.5 + grit * 4
+  const levels = grit > 0.01 ? Math.max(3, Math.round(Math.pow(2, 8 - grit * 5.5) / 2)) : 0
   for (let i = 0; i < n; i++) {
-    const x = ((i / (n - 1)) * 2 - 1) * k
-    // triangle fold: reflect the signal backevery time it passes ±1
-    let y = ((x + 1) % 4 + 4) % 4
+    let x = ((i / (n - 1)) * 2 - 1) * k
+    // the negative half is driven harder: asymmetry = even harmonics
+    if (x < 0) x *= 1 + grit * 0.55
+    // triangle fold: reflect the signal back each time it passes ±1
+    let y = (((x + 1) % 4) + 4) % 4
     y = y > 2 ? 4 - y : y
-    c[i] = (y - 1) * 0.85
+    y = (y - 1) * 0.85
+    if (levels) y = Math.round(y * levels) / levels
+    c[i] = y * (1 - grit * 0.18)
   }
   return c
+}
+
+/**
+ * The grind stage: a parallel path of hard shaping and ring modulation,
+ * crossfaded against the clean signal. Ring modulation is the part that
+ * reads as metal — it adds partials belonging to no harmonic series, so the
+ * result sounds bitten rather than merely saturated. The high-pass keeps the
+ * teeth above the weight instead of eating it.
+ */
+export interface GrindStage {
+  input: GainNode
+  output: GainNode
+  /** distorted path level, 0..1 */
+  wet: GainNode
+  /** clean path level; drop it as `wet` rises to hold the stage level */
+  dry: GainNode
+  /**
+   * Gain into the shaper. A folder only folds what reaches ±1, and a bus
+   * sits well below that, so without drive the stage does nothing but lose
+   * level. Raise this with the mix and compensate with `trim`.
+   */
+  drive: GainNode
+  /** post-shaper compensation, lowered as `drive` rises */
+  trim: GainNode
+}
+
+export function grindStage(
+  ctx: AudioContext,
+  curve: Float32Array<ArrayBuffer>,
+  o: { mix: number; ringHz: number; ringDepth: number; tilt: number },
+): GrindStage {
+  const input = ctx.createGain()
+  const output = ctx.createGain()
+
+  const dry = ctx.createGain()
+  dry.gain.value = 1 - 0.45 * o.mix
+  input.connect(dry).connect(output)
+
+  const wet = ctx.createGain()
+  wet.gain.value = o.mix
+  const drive = ctx.createGain()
+  drive.gain.value = 1
+  const shaper = ctx.createWaveShaper()
+  shaper.curve = curve
+  shaper.oversample = '4x'
+  const trim = ctx.createGain()
+  trim.gain.value = 1
+  const tilt = ctx.createBiquadFilter()
+  tilt.type = 'highpass'
+  tilt.frequency.value = safeParam(o.tilt, 40, 2000, 160)
+  tilt.Q.value = 0.7
+  input.connect(drive).connect(shaper).connect(trim).connect(tilt)
+
+  if (o.ringDepth > 0.001) {
+    // part of the shaped signal passes straight, part is ring modulated
+    const straight = ctx.createGain()
+    straight.gain.value = 1 - o.ringDepth
+    tilt.connect(straight).connect(wet)
+    const ring = ctx.createGain()
+    ring.gain.value = 0
+    const osc = ctx.createOscillator()
+    osc.type = 'square'
+    osc.frequency.value = safeParam(o.ringHz, 20, 4000, 120)
+    const depth = ctx.createGain()
+    depth.gain.value = o.ringDepth
+    osc.connect(depth).connect(ring.gain)
+    tilt.connect(ring).connect(wet)
+    osc.start()
+  } else {
+    tilt.connect(wet)
+  }
+  wet.connect(output)
+  return { input, output, wet, dry, drive, trim }
 }
 
 export interface EnvOptions {

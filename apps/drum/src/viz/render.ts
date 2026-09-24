@@ -127,7 +127,7 @@ export function render(ctx: CanvasRenderingContext2D, v: View) {
         const trackTurn = Math.floor(idx / len)
         const val = rowFor(t, trackTurn)[localStep] ?? 0
         const base = v.pattern[t][localStep] ?? 0
-        const ax = axesAt(idx, cfg)
+        const ax = axesAt(idx, cfg, t)
         // the warp axis moves the dot off its ray, so the timing you hear is
         // the timing you see
         const r = g.trackRadius(turn, t)
@@ -154,14 +154,21 @@ export function render(ctx: CanvasRenderingContext2D, v: View) {
           continue
         }
         const drifted = base <= 0 || Math.abs(val - base) > 0.02
-        // the fold axis colours the dot: more distortion, more saturated
+        // the fold axis colours the dot, the grind axis hardens its edge
         const sat = 55 + 40 * ax.fold
-        const size = 1.6 + 2.6 * val
+        const size = (1.6 + 2.6 * val) * (0.85 + 0.35 * ax.mass * 0.5)
         ctx.globalAlpha = muted ? 0.25 : 1
         ctx.fillStyle = `hsla(${hue + ax.bend * 0.03},${drifted ? sat * 0.75 : sat}%,${drifted ? 52 : 66}%,${editing ? 0.95 : 0.6})`
         ctx.beginPath()
         ctx.arc(x, y, size, 0, TAU)
         ctx.fill()
+        if (ax.grind > 0.45) {
+          // a square around the dot: this hit is being chewed
+          const r2 = size + 1.6
+          ctx.strokeStyle = `hsla(${hue},90%,72%,${0.2 + 0.5 * ax.grind})`
+          ctx.lineWidth = 0.9
+          ctx.strokeRect(x - r2, y - r2, r2 * 2, r2 * 2)
+        }
         if (drifted && trackTurn > 0) {
           // a ring marks a note the spiral moved or invented
           ctx.strokeStyle = `hsla(${hue},70%,70%,0.35)`

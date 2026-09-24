@@ -1,5 +1,6 @@
 import { FixedStepRunner, SourceClock, clamp, createPrng } from '@el-systema/core'
 import { MasterChain, makeSaturation as saturationCurve } from '@el-systema/audio'
+import { grindStage, type GrindStage } from '../audio/dsp'
 import { KITS, KitAssets, type KitId, type KitMacros, type KitNodes } from '../audio/kits'
 import { lerp } from '@el-systema/core'
 import { DEFAULT_SPIRAL, emptyPattern, hitsAt, resizePattern, seedPattern, swingOffset, TRACKS, type Hit, type Pattern, type SpiralConfig, type TrackId } from './pattern'
@@ -21,7 +22,7 @@ export interface MachineState {
   bpm: number
   playing: boolean
   swing: number
-  macros: { tune: number; grit: number; decay: number; space: number; level: number; punch: number; weight: number }
+  macros: { tune: number; grit: number; decay: number; space: number; level: number; punch: number; weight: number; grind: number }
   spiral: SpiralConfig
   /** which track the spiral canvas edits */
   editing: TrackId
@@ -48,7 +49,7 @@ export function defaultState(): MachineState {
     bpm: 124,
     playing: false,
     swing: 0.12,
-    macros: { tune: 0, grit: 0.45, decay: 0.5, space: 0.5, level: 0.8, punch: 0.75, weight: 0.8 },
+    macros: { tune: 0, grit: 0.45, decay: 0.5, space: 0.5, level: 0.8, punch: 0.75, weight: 0.8, grind: 0.55 },
     spiral: { ...DEFAULT_SPIRAL },
     editing: 'kick',
     mutes: { kick: false, sub: false, snare: false, hat: false, perc: false, air: false },
@@ -72,6 +73,9 @@ export class Machine {
   private duckSend: GainNode | null = null
   /** clears the low end out of the non-kick tracks so the kick owns it */
   private bodyHP: BiquadFilterNode | null = null
+  /** GRIND: parallel shaping + ring modulation on each bus */
+  private bodyGrind: GrindStage | null = null
+  private kickGrind: GrindStage | null = null
   /** WEIGHT: a low shelf on the whole kit and a deeper lift on the kick bus */
   private weightShelf: BiquadFilterNode | null = null
   private punchShelf: BiquadFilterNode | null = null
@@ -127,6 +131,23 @@ export class Machine {
     this.bodyHP?.frequency.setTargetAtTime(lerp(45, 190, p) * lerp(1, 0.55, w), t, 0.05)
     this.weightShelf?.gain.setTargetAtTime(lerp(0, 4, w), t, 0.05)
     this.punchShelf?.gain.setTargetAtTime(lerp(3, 6, w), t, 0.05)
+    // the body takes the grind whole; the kick only ever takes half, so the
+    // fundamental survives however far the macro goes
+    const grind = this.state.macros.grind
+    for (const [stage, scale] of [
+      [this.bodyGrind, 1],
+      [this.kickGrind, 0.5],
+    ] as const) {
+      if (!stage) continue
+      const mix = grind * scale
+      stage.wet.gain.setTargetAtTime(mix, t, 0.05)
+      stage.dry.gain.setTargetAtTime(1 - 0.45 * mix, t, 0.05)
+      // The fold is built into the curve, so the shaper only needs the signal
+      // to reach full scale — past ±1 a WaveShaper clamps to the curve's end
+      // and the sound goes dull instead of harsh.
+      stage.drive.gain.setTargetAtTime(1 + 1.8 * mix, t, 0.05)
+      stage.trim.gain.setTargetAtTime(1 / (1 + 0.5 * mix), t, 0.05)
+    }
     this.punchBus?.gain.setTargetAtTime(lerp(1.1, 1.9, p) * KITS[this.state.kit].kickTrim, t, 0.05)
   }
 
@@ -193,7 +214,11 @@ export class Machine {
       punchShelf.frequency.value = 64
       punchShelf.Q.value = 0.8
       this.punchShelf = punchShelf
-      this.punchBus.connect(punchSat).connect(punchShelf).connect(this.chain.input)
+      // the kick's grit runs alongside its body: teeth above 220 Hz only, so
+      // the weight is never chewed by the distortion
+      this.kickGrind = grindStage(ctx, this.assets.fold(0.35, 0.9), { mix: 0, ringHz: 63, ringDepth: 0.3, tilt: 210 })
+      this.punchBus.connect(punchSat).connect(punchShelf).connect(this.kickGrind.input)
+      this.kickGrind.output.connect(this.chain.input)
 
       // ── everything else ────────────────────────────────────────
       // high-passed and ducked by the kick, dry and wet alike
@@ -207,7 +232,12 @@ export class Machine {
       this.weightShelf = ctx.createBiquadFilter()
       this.weightShelf.type = 'lowshelf'
       this.weightShelf.frequency.value = 160
-      this.kitDry.connect(this.bodyHP).connect(this.weightShelf).connect(this.duckDry).connect(this.chain.input)
+      this.bodyGrind = grindStage(ctx, this.assets.fold(0.5, 0.75), { mix: 0, ringHz: 118, ringDepth: 0.5, tilt: 150 })
+      this.kitDry
+        .connect(this.bodyHP)
+        .connect(this.weightShelf)
+        .connect(this.bodyGrind.input)
+      this.bodyGrind.output.connect(this.duckDry).connect(this.chain.input)
       this.kitSend.connect(this.duckSend).connect(this.chain.send)
       this.applyTrim()
       this.applyPunch()
@@ -292,6 +322,8 @@ export class Machine {
       weight: m.weight,
       bend: h.bend,
       fold: h.fold,
+      grind: Math.min(1, h.grind + m.grind * 0.6),
+      mass: h.mass,
       spiral: h.spiral,
     }
     // the kick drives the sidechain, so it must duck before it sounds

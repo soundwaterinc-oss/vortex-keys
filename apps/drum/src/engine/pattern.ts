@@ -51,6 +51,12 @@ export interface SpiralConfig {
   bend: number
   /** 0..1 — distortion along a fifth axis, period 7 turns */
   fold: number
+  /** 0..1 — grit (bit steps, asymmetry, ring) along a sixth axis, 11 turns */
+  grind: number
+  /** 0..1 — how much the sub layer breathes, seventh axis, 13 turns */
+  mass: number
+  /** 0..1 — how much the spiral opens and closes, eighth axis, 6.5 turns */
+  gate: number
   seed: number
 }
 
@@ -63,7 +69,10 @@ export const DEFAULT_SPIRAL: SpiralConfig = {
   poly: 0.45,
   warp: 0.35,
   bend: 0.3,
-  fold: 0.4,
+  fold: 0.45,
+  grind: 0.5,
+  mass: 0.4,
+  gate: 0.35,
   seed: 7,
 }
 
@@ -73,7 +82,13 @@ export const DEFAULT_SPIRAL: SpiralConfig = {
  * inside any reasonable performance, which is what keeps the spiral from
  * reading as one rotating wheel.
  */
-const AXIS_TURNS = { warp: 3, bend: 5, fold: 7 } as const
+const AXIS_TURNS = { warp: 3, bend: 5, fold: 7, grind: 11, mass: 13, gate: 6.5 } as const
+/**
+ * Each track also sits at its own phase on every axis, so one axis never
+ * moves the kit as a block — the kick can be at the top of the grind axis
+ * while the hats are at the bottom of it.
+ */
+const TRACK_PHASE: Record<TrackId, number> = { kick: 0, sub: 0.8, snare: 2.1, hat: 3.4, perc: 4.7, air: 5.6 }
 /** how each track's cycle length is pulled off the bar at poly = 1 */
 const POLY_OFFSET: Record<TrackId, number> = { kick: 0, sub: -1, snare: 1, hat: -3, perc: 3, air: -5 }
 
@@ -93,18 +108,32 @@ export interface Axes {
   bend: number
   /** extra distortion, 0..1 */
   fold: number
+  /** grit: bit steps, asymmetry, ring modulation, 0..1 */
+  grind: number
+  /** sub-layer multiplier, around 1 */
+  mass: number
+  /** trigger-probability multiplier, 0..1 */
+  gate: number
 }
 
-/** The three continuous axes at one point of the spiral. */
-export function axesAt(globalIndex: number, cfg: SpiralConfig): Axes {
+/**
+ * The continuous axes at one point of the spiral, optionally as one track
+ * sees them. Periods are 3, 4.5, 5, 6.5, 7, 11 and 13 turns: no two of them
+ * share a factor, so the combination does not repeat inside any performance.
+ */
+export function axesAt(globalIndex: number, cfg: SpiralConfig, track?: TrackId): Axes {
   const turnPos = globalIndex / Math.max(1, cfg.stepsPerTurn)
-  const ph = (period: number, phase = 0) => Math.sin((turnPos / period) * Math.PI * 2 + phase)
+  const off = track ? TRACK_PHASE[track] : 0
+  const ph = (period: number, phase = 0) => Math.sin((turnPos / period) * Math.PI * 2 + phase + off / period)
   return {
     // two warp components a fifth apart in period, so the push and pull
     // themselves drift in and out of phase
     warp: cfg.warp * 0.5 * (ph(AXIS_TURNS.warp) * 0.7 + ph(AXIS_TURNS.warp * 1.5, 1.1) * 0.3),
     bend: cfg.bend * 140 * ph(AXIS_TURNS.bend),
     fold: cfg.fold * (0.5 + 0.5 * ph(AXIS_TURNS.fold, 0.6)),
+    grind: cfg.grind * (0.5 + 0.5 * ph(AXIS_TURNS.grind, 2.2)),
+    mass: 1 + cfg.mass * 0.9 * ph(AXIS_TURNS.mass, 1.7),
+    gate: 1 - cfg.gate * (0.5 + 0.5 * ph(AXIS_TURNS.gate, 0.3)),
   }
 }
 
@@ -124,6 +153,10 @@ export interface Hit {
   bend: number
   /** extra distortion, 0..1 */
   fold: number
+  /** grit, 0..1 */
+  grind: number
+  /** sub-layer multiplier around 1 */
+  mass: number
 }
 
 const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v)
@@ -190,8 +223,9 @@ export function hitsAt(pattern: Pattern, globalIndex: number, cfg: SpiralConfig)
   const hits: Hit[] = []
   const total = Math.max(1, cfg.stepsPerTurn * cfg.turns)
   const spiral = (((globalIndex % total) + total) % total) / total
-  const ax = axesAt(globalIndex, cfg)
   for (const track of TRACKS) {
+    // every track reads the axes from its own phase
+    const ax = axesAt(globalIndex, cfg, track)
     const len = trackLength(track, cfg)
     const step = ((globalIndex % len) + len) % len
     const turn = Math.floor(globalIndex / len)
@@ -199,7 +233,8 @@ export function hitsAt(pattern: Pattern, globalIndex: number, cfg: SpiralConfig)
     if (!v || v <= 0) continue
     // density thins the spiral out without editing the pattern
     const gate = createPrng(cfg.seed * 31 + turn * 613 + step * 17 + TRACKS.indexOf(track)).next()
-    if (gate > cfg.density) continue
+    // the gate axis opens and closes the whole spiral as it turns
+    if (gate > cfg.density * ax.gate) continue
     // the axes lean on the tracks differently: the ground bends least
     const lean = track === 'kick' ? 0.25 : track === 'sub' ? 0.5 : 1
     hits.push({
@@ -211,6 +246,8 @@ export function hitsAt(pattern: Pattern, globalIndex: number, cfg: SpiralConfig)
       warp: ax.warp * lean,
       bend: ax.bend * lean,
       fold: ax.fold,
+      grind: ax.grind,
+      mass: ax.mass,
     })
   }
   return hits

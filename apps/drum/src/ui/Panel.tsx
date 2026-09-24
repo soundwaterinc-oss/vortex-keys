@@ -44,12 +44,14 @@ export function Panel() {
         />
         <p className="hint">{kit.description}</p>
         <p className="hint">
-          WEIGHT puts a sub layer under every voice, lengthens the bodies and lifts the low end. PUNCH hardens the beater, shortens the
-          body and deepens the duck under every kick.
+          WEIGHT puts a sub layer under every voice and lifts the low end. PUNCH hardens the beater and deepens the duck under every
+          kick. GRIND is the teeth: folded and bit-crushed in parallel, ring modulated, kept above the weight so it bites without
+          eating the bottom.
         </p>
         <Slider label="TUNE" value={s.macros.tune} min={-12} max={12} step={0.5} format={semi} onChange={(v) => macro('tune', v)} />
         <Slider label="WEIGHT" value={s.macros.weight} format={pct} big onChange={(v) => macro('weight', v)} />
         <Slider label="PUNCH" value={s.macros.punch} format={pct} big onChange={(v) => macro('punch', v)} />
+        <Slider label="GRIND" value={s.macros.grind} format={pct} big onChange={(v) => macro('grind', v)} />
         <Slider label="GRIT" value={s.macros.grit} format={pct} onChange={(v) => macro('grit', v)} />
         <Slider label="DECAY" value={s.macros.decay} format={pct} onChange={(v) => macro('decay', v)} />
         <Slider label="SPACE" value={s.macros.space} format={pct} onChange={(v) => macro('space', v)} />
@@ -58,15 +60,19 @@ export function Panel() {
 
       <Section title="SPIRAL">
         <p className="hint">
-          Five axes turning at once, none of them in step: the figure drifts and rotates over {s.spiral.turns} turns (DRIFT, ROTATE), each
-          track runs its own cycle length (POLY), and timing, pitch and distortion swing on periods of 3, 5 and 7 turns (WARP, BEND, FOLD).
-          They only all line up again after a very long time.
+          Eight axes turning at once, none in step with another. The figure drifts and rotates over {s.spiral.turns} turns (DRIFT,
+          ROTATE); each track runs its own cycle length (POLY); and timing, pitch, fold, grit, mass and density swing on periods of 3,
+          4.5, 5, 6.5, 7, 11 and 13 turns (WARP, BEND, FOLD, GRIND↻, MASS↻, GATE↻). Every track also reads those axes from its own phase,
+          so no axis ever moves the kit as a block.
         </p>
         <Slider label="DRIFT" value={s.spiral.drift} format={pct} big onChange={(v) => spiral({ drift: v })} />
         <Slider label="POLY" value={s.spiral.poly} format={pct} big onChange={(v) => spiral({ poly: v })} />
         <Slider label="WARP" value={s.spiral.warp} format={pct} onChange={(v) => spiral({ warp: v })} />
         <Slider label="BEND" value={s.spiral.bend} format={pct} onChange={(v) => spiral({ bend: v })} />
         <Slider label="FOLD" value={s.spiral.fold} format={pct} onChange={(v) => spiral({ fold: v })} />
+        <Slider label="GRIND↻" value={s.spiral.grind} format={pct} onChange={(v) => spiral({ grind: v })} />
+        <Slider label="MASS↻" value={s.spiral.mass} format={pct} onChange={(v) => spiral({ mass: v })} />
+        <Slider label="GATE↻" value={s.spiral.gate} format={pct} onChange={(v) => spiral({ gate: v })} />
         <Slider label="DENSITY" value={s.spiral.density} format={pct} onChange={(v) => spiral({ density: v })} />
         <Slider label="ROTATE" value={s.spiral.rotate} min={-4} max={4} step={1} format={(v) => `${v > 0 ? '+' : ''}${v} st/turn`} onChange={(v) => spiral({ rotate: v })} />
         <Slider label="TURNS" value={s.spiral.turns} min={1} max={6} step={1} format={(v) => String(v)} onChange={(v) => spiral({ turns: v })} />

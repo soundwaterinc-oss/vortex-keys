@@ -36,6 +36,10 @@ export interface KitMacros {
   bend: number
   /** per-hit extra distortion 0..1, from the spiral's fold axis */
   fold: number
+  /** per-hit grit 0..1, from the spiral's grind axis */
+  grind: number
+  /** per-hit sub-layer multiplier, from the spiral's mass axis */
+  mass: number
   /** how long tails are (0..1) */
   decay: number
   /** send level to the shared delay/reverb (0..1) */
@@ -65,7 +69,7 @@ export class KitAssets {
   readonly room: AudioBuffer
   readonly sat: Float32Array<ArrayBuffer>
   private bitCache = new Map<number, Float32Array<ArrayBuffer>>()
-  private foldCache = new Map<number, Float32Array<ArrayBuffer>>()
+  private foldCache = new Map<string, Float32Array<ArrayBuffer>>()
   constructor(ctx: BaseAudioContext) {
     this.noise = noiseBuffer(ctx, 2)
     this.pink = pinkBuffer(ctx, 3)
@@ -74,10 +78,12 @@ export class KitAssets {
     this.sat = saturationCurve(2.2)
   }
   /** wavefolder curves, quantised so a hit never builds a new table */
-  fold(amount: number): Float32Array<ArrayBuffer> {
-    const key = Math.round(Math.max(0, Math.min(1, amount)) * 8)
+  fold(amount: number, grit = 0): Float32Array<ArrayBuffer> {
+    const a = Math.round(Math.max(0, Math.min(1, amount)) * 8)
+    const g = Math.round(Math.max(0, Math.min(1, grit)) * 8)
+    const key = `${a}:${g}`
     let c = this.foldCache.get(key)
-    if (!c) this.foldCache.set(key, (c = foldCurve(key / 8)))
+    if (!c) this.foldCache.set(key, (c = foldCurve(a / 8, g / 8)))
     return c
   }
   bits(b: number): Float32Array<ArrayBuffer> {
@@ -128,10 +134,13 @@ function sub(ctx: AudioContext, t: number, hz: number, dest: AudioNode, level: n
   o.stop(t + decay * 3 + 0.1)
 }
 
-/** A per-hit wavefolder, driven by the spiral's fold axis. */
-function folder(ctx: AudioContext, a: KitAssets, amount: number): WaveShaperNode {
+/**
+ * A per-hit wavefolder, driven by the spiral's fold axis and bitten by its
+ * grind axis. One node, so a voice's graph stays cheap however deep the grit.
+ */
+function folder(ctx: AudioContext, a: KitAssets, amount: number, grit = 0): WaveShaperNode {
   const w = ctx.createWaveShaper()
-  w.curve = a.fold(amount)
+  w.curve = a.fold(amount, grit)
   w.oversample = '2x'
   return w
 }
@@ -175,7 +184,8 @@ const chain: Kit = {
     const ctx = n.ctx
     const tune = semi(m.tune) * cents(m.bend)
     const dec = lerp(0.6, 1.8, m.decay)
-    const w = m.weight
+    // the mass axis makes the weight itself breathe over 13 turns
+    const w = m.weight * m.mass
     // the chord drifts a fifth over the spiral — the slow harmonic turn
     const drift = 1 + 0.02 * Math.sin(m.spiral * Math.PI * 2)
     switch (h.track) {
@@ -184,7 +194,7 @@ const chain: Kit = {
         // already at its note when the room hears it
         const o = body(ctx, t, lerp(130, 200, m.punch) * tune, 49 * tune, lerp(0.05, 0.026, m.punch))
         const g = percEnv(ctx, t, { attack: 0.0015, decay: lerp(0.3, 0.17, m.punch) * dec, peak: 1.0 * h.velocity, curve: 3.6 })
-        const fd = folder(ctx, a, m.fold * 0.55)
+        const fd = folder(ctx, a, m.fold * 0.55, m.grind)
         o.connect(g).connect(fd).connect(n.punch)
         knock(ctx, t, n.punch, a.noise, { level: 0.22 * m.punch * h.velocity, tone: 1400, decay: 0.006, cutoff: 3200 })
         // the mass under the hit: an octave down, three times as long
@@ -195,7 +205,7 @@ const chain: Kit = {
       case 'sub': {
         const o = body(ctx, t, 62 * tune, 38 * tune, 0.22)
         const g = percEnv(ctx, t, { attack: 0.008, decay: lerp(0.7, 1.4, w) * dec, peak: (0.5 + 0.5 * w) * h.velocity, curve: 1.8 })
-        const fd = folder(ctx, a, m.fold * 0.4)
+        const fd = folder(ctx, a, m.fold * 0.4, m.grind)
         o.connect(g).connect(fd)
         fan(fd, n, m.space * 0.15)
         sub(ctx, t, 31 * tune, n.punch, 0.3 * w * h.velocity, 0.42 * dec)
@@ -209,7 +219,7 @@ const chain: Kit = {
         const g = percEnv(ctx, t, { attack: 0.001, decay: lerp(0.16, 0.3, w) * dec, peak: (0.4 + 0.3 * w) * h.velocity })
         const o = body(ctx, t, 190 * tune, 150 * tune, 0.07, 'triangle')
         const og = percEnv(ctx, t, { attack: 0.001, decay: 0.12 * dec, peak: 0.5 * w * h.velocity, curve: 3 })
-        const fd = folder(ctx, a, m.fold)
+        const fd = folder(ctx, a, m.fold, m.grind)
         s.connect(f).connect(g).connect(fd)
         o.connect(og).connect(fd)
         fan(fd, n, m.space * 0.8)
@@ -226,7 +236,7 @@ const chain: Kit = {
         f.frequency.value = lerp(3600, 8200, m.grit)
         f.Q.value = lerp(2.4, 0.9, w)
         const g = percEnv(ctx, t, { attack: 0.0008, decay: lerp(0.045, 0.085, w), peak: (0.26 + 0.14 * w) * h.velocity })
-        const fd = folder(ctx, a, m.fold * 0.8)
+        const fd = folder(ctx, a, m.fold * 0.8, m.grind)
         s.connect(f).connect(g).connect(fd)
         fan(fd, n, m.space * 0.5)
         s.stop(t + 0.5)
@@ -285,7 +295,8 @@ const dust: Kit = {
     const ctx = n.ctx
     const tune = semi(m.tune) * cents(m.bend)
     const dec = lerp(0.6, 1.5, m.decay)
-    const w = m.weight
+    // the mass axis makes the weight itself breathe over 13 turns
+    const w = m.weight * m.mass
     // GRIT = bit depth: 12 bits is clean-ish SP-1200, 6 bits is destroyed
     const crush = ctx.createWaveShaper()
     crush.curve = a.bits(Math.round(lerp(12, 5, m.grit)))
@@ -295,7 +306,7 @@ const dust: Kit = {
     room.buffer = a.room
     const roomG = ctx.createGain()
     roomG.gain.value = lerp(0.08, 0.3, m.space)
-    const fd = folder(ctx, a, m.fold)
+    const fd = folder(ctx, a, m.fold, m.grind)
     crush.connect(sat)
     sat.connect(fd)
     fd.connect(room).connect(roomG)
@@ -430,12 +441,13 @@ const grain: Kit = {
     const ctx = n.ctx
     const tune = semi(m.tune) * cents(m.bend)
     const dec = lerp(0.7, 2.0, m.decay)
-    const w = m.weight
+    // the mass axis makes the weight itself breathe over 13 turns
+    const w = m.weight * m.mass
     const density = Math.round(lerp(6, 34, m.grit))
     const seed = h.turn * 7717 + h.step * 131 + (['kick', 'sub', 'snare', 'hat', 'perc', 'air'] as TrackId[]).indexOf(h.track)
     const bus = ctx.createGain()
     bus.gain.value = h.velocity
-    const fd = folder(ctx, a, m.fold * 0.7)
+    const fd = folder(ctx, a, m.fold * 0.7, m.grind)
     bus.connect(fd)
     fan(fd, n, 0.25 + m.space * 0.9)
 
@@ -499,7 +511,8 @@ const liquid: Kit = {
     const ctx = n.ctx
     const tune = semi(m.tune) * cents(m.bend)
     const dec = lerp(0.9, 2.6, m.decay)
-    const w = m.weight
+    // the mass axis makes the weight itself breathe over 13 turns
+    const w = m.weight * m.mass
     // the whole kit opens and closes across the spiral
     const open = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(m.spiral * Math.PI * 2))
     switch (h.track) {
@@ -509,7 +522,7 @@ const liquid: Kit = {
         const g = percEnv(ctx, t, { attack: 0.002, decay: lerp(0.34, 0.2, m.punch) * dec, peak: 1.0 * h.velocity, curve: 3.2 })
         const sat = ctx.createWaveShaper()
         sat.curve = a.sat
-        const fd = folder(ctx, a, m.fold * 0.6)
+        const fd = folder(ctx, a, m.fold * 0.6, m.grind)
         o.connect(g).connect(sat).connect(fd).connect(n.punch)
         knock(ctx, t, n.punch, a.pink, { level: 0.18 * m.punch * h.velocity, tone: 2200, decay: 0.007, cutoff: 5200 })
         sub(ctx, t, 32 * tune, n.punch, 0.46 * w * h.velocity, lerp(0.25, 0.7, w) * dec)
@@ -519,7 +532,7 @@ const liquid: Kit = {
       case 'sub': {
         const o = body(ctx, t, 74 * tune, 37 * tune, 0.45, 'sine')
         const g = percEnv(ctx, t, { attack: 0.04, decay: lerp(1.1, 1.9, w) * dec, peak: (0.5 + 0.4 * w) * h.velocity, curve: 1.7 })
-        const fd = folder(ctx, a, m.fold * 0.5)
+        const fd = folder(ctx, a, m.fold * 0.5, m.grind)
         o.connect(g).connect(fd)
         fan(fd, n, m.space * 0.5)
         sub(ctx, t, 30 * tune, n.punch, 0.3 * w * h.velocity, 0.5 * dec)
@@ -531,7 +544,7 @@ const liquid: Kit = {
         const s = source(ctx, a.pink, t, 0.4 + h.step * 0.02)
         const f = sweptBand(ctx, t, lerp(700, 2600, open), lerp(3200, 6400, m.grit), 3.5, 0.3 * dec)
         const g = percEnv(ctx, t, { attack: lerp(0.02, 0.006, w), decay: 0.34 * dec, peak: (0.42 + 0.25 * w) * h.velocity, curve: 2.2 })
-        const fd = folder(ctx, a, m.fold)
+        const fd = folder(ctx, a, m.fold, m.grind)
         s.connect(f).connect(g).connect(fd)
         fan(fd, n, 0.3 + m.space)
         sub(ctx, t, 58 * tune, n.out, 0.24 * w * h.velocity, 0.3 * dec)
@@ -568,7 +581,7 @@ const liquid: Kit = {
         mg.gain.setTargetAtTime(0, t, 0.05)
         mod.connect(mg).connect(o.frequency)
         const g = percEnv(ctx, t, { attack: 0.004, decay: 0.5 * dec, peak: 0.34 * h.velocity, curve: 2.4 })
-        const fd = folder(ctx, a, m.fold)
+        const fd = folder(ctx, a, m.fold, m.grind)
         o.connect(g).connect(fd)
         fan(fd, n, 0.4 + m.space)
         sub(ctx, t, f0 * 0.25, n.out, 0.2 * w * h.velocity, 0.45 * dec)
