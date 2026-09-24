@@ -298,7 +298,7 @@ export function seedPattern(name: string, stepsPerTurn: number): Pattern {
     }
   }
   switch (name) {
-    case 'chain': // four to the floor, off-beat stab, sparse ghost snare
+    case 'chain': // DUNE: four to the floor, off-beat hand drum, sparse ghost snare
       put('kick', [0, 4, 8, 12], 1)
       put('sub', [0, 8], 0.7)
       put('hat', [2, 6, 10, 14], 0.5)
@@ -306,7 +306,7 @@ export function seedPattern(name: string, stepsPerTurn: number): Pattern {
       put('snare', [12], 0.4)
       put('air', [0], 0.5)
       break
-    case 'dust': // boom-bap: kick on 1 and the and-of-3, snare on 2 and 4
+    case 'dust': // PATINA: kick on 1 and the and-of-3, rimshot on 2 and 4
       put('kick', [0, 7, 10], 1)
       put('snare', [4, 12], 0.95)
       put('hat', [0, 2, 4, 6, 8, 10, 12, 14], 0.45)
@@ -314,7 +314,7 @@ export function seedPattern(name: string, stepsPerTurn: number): Pattern {
       put('sub', [0, 10], 0.6)
       put('air', [0], 0.4)
       break
-    case 'grain': // sparse, irregular: the cloud does the work
+    case 'grain': // SILT: sparse and irregular — the cloud does the work
       put('kick', [0, 11], 0.85)
       put('snare', [6], 0.5)
       put('hat', [3, 5, 9, 13, 14], 0.4)
@@ -322,7 +322,7 @@ export function seedPattern(name: string, stepsPerTurn: number): Pattern {
       put('sub', [0], 0.55)
       put('air', [0, 8], 0.6)
       break
-    default: // liquid: broken, syncopated, long tails
+    default: // PULSE: broken, syncopated, gated
       put('kick', [0, 6], 0.95)
       put('snare', [4, 12], 0.6)
       put('hat', [2, 3, 7, 10, 11, 15], 0.4)

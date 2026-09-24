@@ -43,8 +43,8 @@ export function pinkBuffer(ctx: BaseAudioContext, seconds: number, seed = 337): 
 
 /**
  * Vinyl: pink noise with sparse crackle on top. Used as the bed of the
- * hip-hop kit and as grain material for the Jelinek kit, where a record's
- * surface is the instrument rather than a defect.
+ * aged sampler kit and as grain material for the particle kit, where a
+ * record's surface is the instrument rather than a defect.
  */
 export function vinylBuffer(ctx: BaseAudioContext, seconds: number, seed = 5150): AudioBuffer {
   const buf = pinkBuffer(ctx, seconds, seed)
@@ -87,7 +87,7 @@ export function saturationCurve(drive: number, n = 1024): Float32Array<ArrayBuff
 
 /**
  * Quantisation curve: rounds the signal to `bits` levels. This is the
- * SP-1200/MPC60 character — the grit is in the low bit depth, not in a
+ * early-sampler character — the grit is in the low bit depth, not in a
  * filter — and it costs one WaveShaper.
  */
 export function bitCurve(bits: number, n = 2048): Float32Array<ArrayBuffer> {

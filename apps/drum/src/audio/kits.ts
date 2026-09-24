@@ -5,19 +5,19 @@ import { bitCurve, foldCurve, impulse, knock, noiseBuffer, percEnv, pinkBuffer, 
 /**
  * Four kits, four ideas of what a drum is.
  *
- *   chain   Basic Channel / Chain Reaction: a sine kick, a hiss, and a chord
- *           stab that exists mainly as its own reverb tail. Almost nothing
- *           is dry; the room is the instrument.
- *   dust    late-80s sampler hip-hop: 12-bit quantisation, a short room, tape
- *           saturation and a vinyl bed. Grit comes from bit depth, not EQ.
- *   grain   Jan Jelinek / clicks & cuts: every hit is a cloud of short grains
- *           read from a vinyl buffer at random offsets, plus micro-clicks.
- *           Rhythm is made of particles, not of drums.
- *   liquid  2026 electronica: pitch-gliding glass, swept formants, smeared
- *           transients, long wet tails. Clean, fluid, no grit at all.
+ *   DUNE    desert dub: struck membranes and skin instead of metal, a long
+ *           filtered bass, dark smeared delay, sand in the top.
+ *   PATINA  aged sampler music: a rimshot off an old record, a low shell,
+ *           reduced bit depth, a short room, and a groove that refuses the
+ *           grid — the snare drags, the hats lean early.
+ *   SILT    particles: every hit is a cloud of grains a few milliseconds
+ *           long cut from a record, plus micro-clicks, over a hard kick.
+ *   PULSE   test signals: sine tones with hard gates, square-edged noise
+ *           bursts, pips at the top of hearing, and silence as an event.
  *
- * Every kit gets the same call: voice(hit, ctx, macros) and returns nothing —
- * it schedules itself on the audio clock and disposes on its own.
+ * Every kit gets the same call: voice(hit, time, nodes, assets, macros) and
+ * returns nothing — it schedules itself on the audio clock and disposes on
+ * its own.
  */
 
 export type KitId = 'chain' | 'dust' | 'grain' | 'liquid'
@@ -57,8 +57,8 @@ export interface KitNodes {
   /**
    * Tempo-synced ping-pong delay. Unlike `send`, this is a rhythmic device
    * rather than a room: the taps land on the grid and alternate across the
-   * stereo field, which is how a Monolake track's delays become part of the
-   * pattern instead of a wash behind it.
+   * stereo field, so the repeats become part of the pattern instead of a
+   * wash behind it.
    */
   echo: GainNode
   /**
@@ -119,8 +119,8 @@ export interface Kit {
   kickTrim: number
   /**
    * The kit's feel: a fixed offset per track in fractions of a step. This is
-   * where a groove that refuses the grid lives — Dilla's snare arrives late
-   * and his hats sit a hair early, and no amount of swing produces that,
+   * where a groove that refuses the grid lives: a snare that arrives late
+   * and hats that sit a hair early. No amount of swing produces that,
    * because swing moves every odd step by the same amount.
    */
   timing?: Partial<Record<TrackId, number>>
@@ -243,19 +243,19 @@ function membrane(
   }
 }
 
-// ───────────────────── CHAIN · after Azu Tiwaline ─────────────────────
+// ───────────────────────────── DUNE · desert dub ─────────────────────────────
 /**
- * Desert dub rather than Berlin dub: the weight is in skin and earth, not
- * in metal. Hand drums carry the rhythm, the bass is long and filtered, the
- * delay is dark and smeared, and the top is sand rather than hi-hat. Nothing
- * up there is bright on purpose — the air in this kit is dust in the wind.
+ * Desert rather than city: the weight is in skin and earth, not in metal.
+ * Hand drums carry the rhythm, the bass is long and filtered, the delay is
+ * dark and smeared, and the top is sand rather than hi-hat. Nothing up
+ * there is bright on purpose — the air in this kit is dust in the wind.
  */
 const chain: Kit = {
   id: 'chain',
   kickTrim: 1.0,
   trim: 2.4,
-  name: 'CHAIN / Azu Tiwaline',
-  description: 'After Azu Tiwaline: desert dub — hand drums and skin instead of metal, a long filtered bass, dark smeared delay, sand in the top.',
+  name: 'DUNE / desert dub',
+  description: 'Hand drums and skin instead of metal: a long filtered bass, dark smeared delay, sand in the top. Desert weight, no glare.',
   humanize: 0.3,
   timing: { perc: 0.05, hat: -0.02 },
   voice(h, t, n, a, m) {
@@ -360,21 +360,21 @@ const chain: Kit = {
   },
 }
 
-// ───────────────────────── DUST · after J Dilla ─────────────────────────
+// ─────────────────────────── PATINA · aged sampler ───────────────────────────
 /**
- * The feel is the instrument here. Dilla's drums are not quantised: the
- * snare lands late enough to be wrong on paper, the hats sit a hair early,
- * and the velocities never repeat — the groove comes from that argument
- * between the parts, not from swing. The sound is the MPC behind it: fat,
- * filtered, dusty, more low-mid than top.
+ * The feel is the instrument here. Nothing is quantised: the snare lands
+ * late enough to be wrong on paper, the hats sit a hair early, and the
+ * velocities never repeat — the groove comes from that argument between the
+ * parts, not from swing. The sound is the sampler behind it: fat, filtered,
+ * dusty, more low-mid than top.
  */
 const dust: Kit = {
   id: 'dust',
   kickTrim: 1.4,
   trim: 1.15,
-  name: 'DUST / J Dilla',
-  description: 'After Dilla: the snare drags behind the beat, the hats lean early, nothing repeats its velocity. Fat, filtered, dusty.',
-  // the famous drunk feel, in fractions of a step
+  name: 'PATINA / aged sampler',
+  description: 'The snare drags behind the beat, the hats lean early, nothing repeats its velocity. A rimshot off an old record over a low shell.',
+  // the drunk feel, in fractions of a step
   timing: { snare: 0.16, hat: -0.045, perc: 0.09, sub: 0.03 },
   humanize: 0.55,
   voice(h, t, n, a, m) {
@@ -551,20 +551,20 @@ function cloud(
   }
 }
 
-// ───────────────────────── GRAIN · after Jan Jelinek ─────────────────────────
+// ────────────────────────────── SILT · particles ──────────────────────────────
 /**
- * Jelinek takes a few seconds of a record and loops the part that was never
- * the music — the haze between the notes — until it becomes the music. So
- * this kit is warm and muted rather than clicky: grains are long, low-passed
- * and overlapping, and the percussion is what is left when you filter a loop
- * hard enough that only its shape survives.
+ * Take a few seconds of a record and keep the part that was never the music
+ * — the haze between the notes — until it becomes the music. The grains are
+ * only milliseconds long and there are many of them, so a hit arrives as a
+ * density rather than as an attack, and the percussion is what is left when
+ * a loop is filtered hard enough that only its shape survives.
  */
 const grain: Kit = {
   id: 'grain',
   kickTrim: 1.45,
   trim: 7.6,
-  name: 'GRAIN / Jan Jelinek',
-  description: 'After Jelinek: very fine grains cut from a record — a few milliseconds each, many of them — micro-clicks, and a hard kick standing under the dust.',
+  name: 'SILT / particles',
+  description: 'Very fine grains cut from a record — a few milliseconds each, many of them — micro-clicks, and a hard kick standing under the dust.',
   humanize: 0.25,
   voice(h, t, n, a, m) {
     const ctx = n.ctx
@@ -642,10 +642,10 @@ const grain: Kit = {
   },
 }
 
-// ───────────────────────── PULSE · after Ryoji Ikeda ─────────────────────────
+// ───────────────────────────── PULSE · test signals ─────────────────────────────
 /**
- * Ikeda's material is the test signal itself: pure sine tones at the edges
- * of hearing, single-sample impulses, gated noise, and silence used as an
+ * The material is the test signal itself: pure sine tones at the edges of
+ * hearing, single-sample impulses, gated noise, and silence used as an
  * event. Nothing is smeared, nothing is warmed — a hit either exists at full
  * scale or does not exist. The only weight is a sine, and it is exact.
  */
@@ -653,8 +653,8 @@ const liquid: Kit = {
   id: 'liquid',
   kickTrim: 1.9,
   trim: 1.0,
-  name: 'PULSE / Ryoji Ikeda',
-  description: 'After Ikeda: sine test tones, single-sample impulses, gated noise and silence as an event. Nothing smeared, nothing warmed.',
+  name: 'PULSE / test signals',
+  description: 'Sine test tones, single-sample impulses, gated noise and silence as an event. Nothing smeared, nothing warmed.',
   voice(h, t, n, a, m) {
     const ctx = n.ctx
     const tune = semi(m.tune) * cents(m.bend)
