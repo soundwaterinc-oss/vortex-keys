@@ -49,7 +49,7 @@ export function defaultState(): MachineState {
     bpm: 124,
     playing: false,
     swing: 0.12,
-    macros: { tune: 0, grit: 0.45, decay: 0.5, space: 0.5, level: 0.8, punch: 0.75, weight: 0.8, grind: 0.55 },
+    macros: { tune: 0, grit: 0.45, decay: 0.5, space: 0.5, level: 0.8, punch: 0.75, weight: 0.8, grind: 0.18 },
     spiral: { ...DEFAULT_SPIRAL },
     editing: 'kick',
     mutes: { kick: false, sub: false, snare: false, hat: false, perc: false, air: false },
@@ -216,7 +216,7 @@ export class Machine {
       this.punchShelf = punchShelf
       // the kick's grit runs alongside its body: teeth above 220 Hz only, so
       // the weight is never chewed by the distortion
-      this.kickGrind = grindStage(ctx, this.assets.fold(0.35, 0.9), { mix: 0, ringHz: 63, ringDepth: 0.3, tilt: 210 })
+      this.kickGrind = grindStage(ctx, this.assets.fold(0.35, 0.9), { mix: 0, ringHz: 63, ringDepth: 0.18, tilt: 210 })
       this.punchBus.connect(punchSat).connect(punchShelf).connect(this.kickGrind.input)
       this.kickGrind.output.connect(this.chain.input)
 
@@ -232,7 +232,7 @@ export class Machine {
       this.weightShelf = ctx.createBiquadFilter()
       this.weightShelf.type = 'lowshelf'
       this.weightShelf.frequency.value = 160
-      this.bodyGrind = grindStage(ctx, this.assets.fold(0.5, 0.75), { mix: 0, ringHz: 118, ringDepth: 0.5, tilt: 150 })
+      this.bodyGrind = grindStage(ctx, this.assets.fold(0.5, 0.75), { mix: 0, ringHz: 118, ringDepth: 0.3, tilt: 150 })
       this.kitDry
         .connect(this.bodyHP)
         .connect(this.weightShelf)
@@ -322,7 +322,7 @@ export class Machine {
       weight: m.weight,
       bend: h.bend,
       fold: h.fold,
-      grind: Math.min(1, h.grind + m.grind * 0.6),
+      grind: Math.min(0.6, h.grind * 0.45 + m.grind * 0.45),
       mass: h.mass,
       spiral: h.spiral,
     }

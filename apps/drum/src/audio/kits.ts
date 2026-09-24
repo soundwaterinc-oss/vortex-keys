@@ -196,7 +196,7 @@ const chain: Kit = {
         const g = percEnv(ctx, t, { attack: 0.0015, decay: lerp(0.3, 0.17, m.punch) * dec, peak: 1.0 * h.velocity, curve: 3.6 })
         const fd = folder(ctx, a, m.fold * 0.55, m.grind)
         o.connect(g).connect(fd).connect(n.punch)
-        knock(ctx, t, n.punch, a.noise, { level: 0.22 * m.punch * h.velocity, tone: 1400, decay: 0.006, cutoff: 3200 })
+        knock(ctx, t, n.punch, a.noise, { level: 0.13 * m.punch * h.velocity, tone: 1400, decay: 0.006, cutoff: 3200 })
         // the mass under the hit: an octave down, three times as long
         sub(ctx, t, 30 * tune, n.punch, 0.42 * w * h.velocity, lerp(0.2, 0.55, w) * dec)
         o.stop(t + 0.9 * dec)
@@ -216,7 +216,7 @@ const chain: Kit = {
         // a rim shot with a body under it, not a hiss
         const s = source(ctx, a.noise, t, 0.3 + h.step * 0.01)
         const f = sweptBand(ctx, t, 2400, 1200, 1.1, 0.14)
-        const g = percEnv(ctx, t, { attack: 0.001, decay: lerp(0.16, 0.3, w) * dec, peak: (0.4 + 0.3 * w) * h.velocity })
+        const g = percEnv(ctx, t, { attack: 0.001, decay: lerp(0.16, 0.3, w) * dec, peak: (0.24 + 0.18 * w) * h.velocity })
         const o = body(ctx, t, 190 * tune, 150 * tune, 0.07, 'triangle')
         const og = percEnv(ctx, t, { attack: 0.001, decay: 0.12 * dec, peak: 0.5 * w * h.velocity, curve: 3 })
         const fd = folder(ctx, a, m.fold, m.grind)
@@ -235,7 +235,7 @@ const chain: Kit = {
         f.type = 'bandpass'
         f.frequency.value = lerp(3600, 8200, m.grit)
         f.Q.value = lerp(2.4, 0.9, w)
-        const g = percEnv(ctx, t, { attack: 0.0008, decay: lerp(0.045, 0.085, w), peak: (0.26 + 0.14 * w) * h.velocity })
+        const g = percEnv(ctx, t, { attack: 0.0008, decay: lerp(0.045, 0.085, w), peak: (0.19 + 0.11 * w) * h.velocity })
         const fd = folder(ctx, a, m.fold * 0.8, m.grind)
         s.connect(f).connect(g).connect(fd)
         fan(fd, n, m.space * 0.5)
@@ -244,7 +244,7 @@ const chain: Kit = {
       }
       case 'perc': {
         // the stab: two detuned saw pairs, band-passed, mostly送り to the room
-        const g = percEnv(ctx, t, { attack: 0.004, decay: 0.22 * dec, peak: 0.3 * h.velocity, curve: 2.2 })
+        const g = percEnv(ctx, t, { attack: 0.004, decay: 0.22 * dec, peak: 0.4 * h.velocity, curve: 2.2 })
         const f = ctx.createBiquadFilter()
         f.type = 'bandpass'
         f.Q.value = 1.1
@@ -270,14 +270,15 @@ const chain: Kit = {
       }
       case 'air': {
         const s = source(ctx, a.pink, t, (h.turn * 0.37) % 2, 1, true)
+        // low rumble, not hiss: the bed carries weight, not noise
         const f = ctx.createBiquadFilter()
-        f.type = 'bandpass'
-        f.frequency.value = lerp(900, 4000, m.grit)
-        f.Q.value = 0.7
-        const g = percEnv(ctx, t, { attack: 0.35, decay: 1.6 * dec, peak: 0.07 * h.velocity, curve: 1.6 })
+        f.type = 'lowpass'
+        f.frequency.value = lerp(700, 220, w)
+        f.Q.value = 0.9
+        const g = percEnv(ctx, t, { attack: 0.2, decay: 0.9 * dec, peak: (0.05 + 0.08 * w) * h.velocity, curve: 1.8 })
         s.connect(f).connect(g)
-        fan(g, n, 0.4 + m.space)
-        s.stop(t + 4 * dec)
+        fan(g, n, 0.25 + m.space * 0.6)
+        s.stop(t + 3 * dec)
         break
       }
     }
@@ -288,7 +289,7 @@ const chain: Kit = {
 const dust: Kit = {
   id: 'dust',
   kickTrim: 1.4,
-  trim: 0.85,
+  trim: 1.15,
   name: 'DUST / vintage hip-hop',
   description: '12-bit sampler grit: quantised to few levels, saturated, in a small room, over a vinyl bed.',
   voice(h, t, n, a, m) {
@@ -325,7 +326,7 @@ const dust: Kit = {
         kickSat.curve = a.sat
         kickCrush.connect(kickSat).connect(n.punch)
         o.connect(g).connect(kickCrush)
-        knock(ctx, t, kickCrush, a.noise, { level: 0.4 * m.punch * h.velocity, tone: 1900, decay: 0.008, cutoff: 4200, offset: 0.11 })
+        knock(ctx, t, kickCrush, a.noise, { level: 0.24 * m.punch * h.velocity, tone: 1900, decay: 0.008, cutoff: 4200, offset: 0.11 })
         sub(ctx, t, 34 * tune, n.punch, 0.46 * w * h.velocity, lerp(0.22, 0.6, w) * dec)
         o.stop(t + 0.8 * dec)
         break
@@ -342,10 +343,10 @@ const dust: Kit = {
       case 'snare': {
         const s = source(ctx, a.noise, t, 0.05 + h.step * 0.02)
         const f = sweptBand(ctx, t, 2100, 1300, 0.9, 0.09)
-        const g = percEnv(ctx, t, { attack: 0.0008, decay: 0.2 * dec, peak: 0.7 * h.velocity, curve: 3.2 })
+        const g = percEnv(ctx, t, { attack: 0.0008, decay: 0.2 * dec, peak: 0.45 * h.velocity, curve: 3.2 })
         // a tuned ring under the noise: the sampled snare's body
         const o = body(ctx, t, 195 * tune, 160 * tune, 0.08, 'triangle')
-        const og = percEnv(ctx, t, { attack: 0.001, decay: lerp(0.1, 0.22, w) * dec, peak: (0.35 + 0.35 * w) * h.velocity })
+        const og = percEnv(ctx, t, { attack: 0.001, decay: lerp(0.1, 0.22, w) * dec, peak: (0.48 + 0.42 * w) * h.velocity })
         s.connect(f).connect(g).connect(crush)
         o.connect(og).connect(crush)
         sub(ctx, t, 65 * tune, n.out, 0.16 * w * h.velocity, 0.2 * dec)
@@ -361,7 +362,7 @@ const dust: Kit = {
         f.frequency.value = lerp(6800, 3400, w)
         // every other hat is a touch longer: the loop's human unevenness
         const open = (h.step % 8 === 6 ? 0.1 : 0.035) * lerp(1, 1.7, w)
-        const g = percEnv(ctx, t, { attack: 0.0006, decay: open * dec, peak: 0.3 * h.velocity })
+        const g = percEnv(ctx, t, { attack: 0.0006, decay: open * dec, peak: 0.18 * h.velocity })
         s.connect(f).connect(g).connect(crush)
         s.stop(t + 0.5)
         break
@@ -369,7 +370,7 @@ const dust: Kit = {
       case 'perc': {
         // rim / wood knock
         const o = body(ctx, t, 900 * tune, 560 * tune, 0.03, 'square')
-        const g = percEnv(ctx, t, { attack: 0.0005, decay: lerp(0.05, 0.11, w) * dec, peak: (0.3 + 0.25 * w) * h.velocity, curve: 4 })
+        const g = percEnv(ctx, t, { attack: 0.0005, decay: lerp(0.05, 0.11, w) * dec, peak: (0.38 + 0.3 * w) * h.velocity, curve: 4 })
         const f = ctx.createBiquadFilter()
         f.type = 'bandpass'
         f.frequency.value = 1500 * tune
@@ -385,7 +386,7 @@ const dust: Kit = {
         const f = ctx.createBiquadFilter()
         f.type = 'lowpass'
         f.frequency.value = lerp(6000, 1100, Math.max(m.grit, w))
-        const g = percEnv(ctx, t, { attack: 0.1, decay: 0.7 * dec, peak: (0.16 + 0.12 * w) * h.velocity, curve: 1.8 })
+        const g = percEnv(ctx, t, { attack: 0.1, decay: 0.7 * dec, peak: (0.09 + 0.07 * w) * h.velocity, curve: 1.8 })
         s.connect(f).connect(g).connect(sat)
         s.stop(t + 5 * dec)
         break
@@ -434,7 +435,7 @@ function cloud(
 const grain: Kit = {
   id: 'grain',
   kickTrim: 1.05,
-  trim: 5.4,
+  trim: 7.6,
   name: 'GRAIN / particle',
   description: 'Jelinek: every hit is a cloud of grains read from a record, plus micro-clicks. Rhythm made of particles.',
   voice(h, t, n, a, m) {
@@ -457,11 +458,11 @@ const grain: Kit = {
         const o = body(ctx, t, lerp(125, 185, m.punch) * tune, 48 * tune, lerp(0.055, 0.03, m.punch))
         const g = percEnv(ctx, t, { attack: 0.0015, decay: lerp(0.28, 0.16, m.punch) * dec, peak: 1.0 * h.velocity, curve: 3.6 })
         o.connect(g).connect(n.punch)
-        knock(ctx, t, n.punch, a.noise, { level: 0.25 * m.punch * h.velocity, tone: 1250, decay: 0.005, cutoff: 3000 })
+        knock(ctx, t, n.punch, a.noise, { level: 0.15 * m.punch * h.velocity, tone: 1250, decay: 0.005, cutoff: 3000 })
         sub(ctx, t, 31 * tune, n.punch, 0.46 * w * h.velocity, lerp(0.2, 0.58, w) * dec)
         o.stop(t + 0.9 * dec)
         // the cloud is the kick's shadow, short and behind it
-        cloud(ctx, a, t + 0.004, bus, { count: Math.max(4, density >> 1), spread: 0.04, grain: 0.022, rate: 0.5, centre: 260, q: 1.5, peak: 0.22, decay: 2.2, seed })
+        cloud(ctx, a, t + 0.004, bus, { count: Math.max(4, density >> 1), spread: 0.04, grain: 0.022, rate: 0.5, centre: 260, q: 1.5, peak: 0.19, decay: 2.2, seed })
         break
       }
       case 'sub': {
@@ -473,11 +474,11 @@ const grain: Kit = {
         break
       }
       case 'snare':
-        cloud(ctx, a, t, bus, { count: density * 2, spread: 0.09 * dec, grain: lerp(0.022, 0.05, w), rate: lerp(1.4, 0.75, w), centre: lerp(1800, 700, w), q: 2.5, peak: 0.42 + 0.2 * w, decay: 1.9, seed })
+        cloud(ctx, a, t, bus, { count: density * 2, spread: 0.09 * dec, grain: lerp(0.022, 0.05, w), rate: lerp(1.4, 0.75, w), centre: lerp(1800, 700, w), q: 2.5, peak: 0.34 + 0.17 * w, decay: 1.9, seed })
         sub(ctx, t, 62 * tune, n.out, 0.15 * w * h.velocity, 0.24 * dec)
         break
       case 'hat':
-        cloud(ctx, a, t, bus, { count: Math.max(3, density >> 1), spread: 0.025, grain: lerp(0.008, 0.02, w), rate: lerp(2.6, 1.3, w), centre: lerp(7200, 3000, w), q: 4, peak: 0.3 + 0.15 * w, decay: 2.4, seed })
+        cloud(ctx, a, t, bus, { count: Math.max(3, density >> 1), spread: 0.025, grain: lerp(0.008, 0.02, w), rate: lerp(2.6, 1.3, w), centre: lerp(7200, 3000, w), q: 4, peak: 0.22 + 0.11 * w, decay: 2.4, seed })
         break
       case 'perc': {
         // the click: a single sample-short impulse through a resonant band
@@ -486,15 +487,15 @@ const grain: Kit = {
         f.type = 'bandpass'
         f.frequency.value = lerp(900, 5200, ((h.spiral * 3) % 1))
         f.Q.value = 18
-        const g = percEnv(ctx, t, { attack: 0.0003, decay: 0.02 * dec, peak: 0.5, curve: 5 })
+        const g = percEnv(ctx, t, { attack: 0.0003, decay: 0.02 * dec, peak: 0.42, curve: 5 })
         s.connect(f).connect(g).connect(bus)
         s.stop(t + 0.2)
-        cloud(ctx, a, t + 0.01, bus, { count: 6, spread: 0.12 * dec, grain: 0.05, rate: 0.9, centre: 1200, q: 1.2, peak: 0.18, decay: 1.2, seed: seed + 1 })
+        cloud(ctx, a, t + 0.01, bus, { count: 6, spread: 0.12 * dec, grain: 0.05, rate: 0.9, centre: 1200, q: 1.2, peak: 0.14, decay: 1.2, seed: seed + 1 })
         break
       }
       case 'air':
         // a long drizzle: the cloud that never quite settles
-        cloud(ctx, a, t, bus, { count: density * 2, spread: 0.7 * dec, grain: lerp(0.06, 0.13, w), rate: lerp(0.7, 0.35, w), centre: lerp(1000, 300, w), q: 0.9, peak: 0.12 + 0.12 * w, decay: 0.7, seed: seed + 9 })
+        cloud(ctx, a, t, bus, { count: density * 2, spread: 0.7 * dec, grain: lerp(0.06, 0.13, w), rate: lerp(0.7, 0.35, w), centre: lerp(1000, 300, w), q: 0.9, peak: 0.09 + 0.09 * w, decay: 0.7, seed: seed + 9 })
         break
     }
   },
@@ -524,7 +525,7 @@ const liquid: Kit = {
         sat.curve = a.sat
         const fd = folder(ctx, a, m.fold * 0.6, m.grind)
         o.connect(g).connect(sat).connect(fd).connect(n.punch)
-        knock(ctx, t, n.punch, a.pink, { level: 0.18 * m.punch * h.velocity, tone: 2200, decay: 0.007, cutoff: 5200 })
+        knock(ctx, t, n.punch, a.pink, { level: 0.11 * m.punch * h.velocity, tone: 2200, decay: 0.007, cutoff: 5200 })
         sub(ctx, t, 32 * tune, n.punch, 0.46 * w * h.velocity, lerp(0.25, 0.7, w) * dec)
         o.stop(t + 1.1 * dec)
         break
@@ -543,7 +544,7 @@ const liquid: Kit = {
         // no transient: a swept formant that arrives instead of hitting
         const s = source(ctx, a.pink, t, 0.4 + h.step * 0.02)
         const f = sweptBand(ctx, t, lerp(700, 2600, open), lerp(3200, 6400, m.grit), 3.5, 0.3 * dec)
-        const g = percEnv(ctx, t, { attack: lerp(0.02, 0.006, w), decay: 0.34 * dec, peak: (0.42 + 0.25 * w) * h.velocity, curve: 2.2 })
+        const g = percEnv(ctx, t, { attack: lerp(0.02, 0.006, w), decay: 0.34 * dec, peak: (0.26 + 0.16 * w) * h.velocity, curve: 2.2 })
         const fd = folder(ctx, a, m.fold, m.grind)
         s.connect(f).connect(g).connect(fd)
         fan(fd, n, 0.3 + m.space)
@@ -560,7 +561,7 @@ const liquid: Kit = {
         f.type = 'bandpass'
         f.frequency.value = 9000
         f.Q.value = 6
-        const g = percEnv(ctx, t, { attack: 0.001, decay: 0.05 * dec, peak: 0.2 * h.velocity })
+        const g = percEnv(ctx, t, { attack: 0.001, decay: 0.05 * dec, peak: 0.26 * h.velocity })
         o.connect(f).connect(g)
         fan(g, n, 0.25 + m.space * 0.7)
         o.stop(t + 0.5)
@@ -580,7 +581,7 @@ const liquid: Kit = {
         mg.gain.setValueAtTime(f0 * lerp(0.2, 1.4, m.grit), t)
         mg.gain.setTargetAtTime(0, t, 0.05)
         mod.connect(mg).connect(o.frequency)
-        const g = percEnv(ctx, t, { attack: 0.004, decay: 0.5 * dec, peak: 0.34 * h.velocity, curve: 2.4 })
+        const g = percEnv(ctx, t, { attack: 0.004, decay: 0.5 * dec, peak: 0.44 * h.velocity, curve: 2.4 })
         const fd = folder(ctx, a, m.fold, m.grind)
         o.connect(g).connect(fd)
         fan(fd, n, 0.4 + m.space)
@@ -599,7 +600,7 @@ const liquid: Kit = {
         f2.type = 'bandpass'
         f2.frequency.value = 5200
         f2.Q.value = 1.4
-        const g = percEnv(ctx, t, { attack: 0.25, decay: 0.8 * dec, peak: (0.07 + 0.07 * w) * h.velocity, curve: 1.8 })
+        const g = percEnv(ctx, t, { attack: 0.25, decay: 0.8 * dec, peak: (0.04 + 0.04 * w) * h.velocity, curve: 1.8 })
         s.connect(f1).connect(g)
         s.connect(f2).connect(g)
         fan(g, n, 0.5 + m.space)
