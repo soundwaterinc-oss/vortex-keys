@@ -16,6 +16,38 @@ import { DEFAULT_SPIRAL, emptyPattern, hitsAt, resizePattern, seedPattern, swing
 
 const TICK_MS = 25
 const LOOKAHEAD = 0.12
+// 裏に回したタブでは setInterval が 1s 以上へ絞られる。0.12s 先読みのままだと起床の合間に
+// 音が途切れるので、hidden の間だけ先読みを広げる（反応は鈍るが鳴り続ける方を採る）。
+const LOOKAHEAD_HIDDEN = 1.6
+
+/**
+ * 背景タブでも絞られないティッカー。Worker のタイマーはページの throttle を受けにくいので、
+ * 使えるなら Worker で刻み、駄目なら setInterval に落とす。
+ */
+function createTicker(ms: number, fn: () => void): { stop: () => void } {
+  try {
+    const src =
+      'var t=null;onmessage=function(e){var d=e.data;if(d&&d.ms){clearInterval(t);t=setInterval(function(){postMessage(0)},d.ms)}else{clearInterval(t);t=null}}'
+    const url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }))
+    const w = new Worker(url)
+    w.onmessage = () => fn()
+    w.postMessage({ ms })
+    return {
+      stop: () => {
+        try {
+          w.postMessage(0)
+          w.terminate()
+          URL.revokeObjectURL(url)
+        } catch {
+          /* already gone */
+        }
+      },
+    }
+  } catch {
+    const h = window.setInterval(fn, ms)
+    return { stop: () => window.clearInterval(h) }
+  }
+}
 
 export interface MachineState {
   kit: KitId
@@ -86,6 +118,7 @@ export class Machine {
   private clock: SourceClock | null = null
   private runner: FixedStepRunner | null = null
   private timer: number | null = null
+  private ticker: { stop: () => void } | null = null
   private listeners = new Set<() => void>()
   /** index of the next step to schedule, counted from the start of the spiral */
   private cursor = 0
@@ -286,7 +319,7 @@ export class Machine {
       this.runner = new FixedStepRunner(this.clock, () => {}, { dt: 1 / 60, lookahead: LOOKAHEAD, maxCatchUp: 0.5 })
       this.cursor = 0
       this.cursorTime = ctx.currentTime + 0.1
-      this.timer = window.setInterval(() => this.tick(), TICK_MS)
+      this.ticker = createTicker(TICK_MS, () => this.tick())
     }
     if (this.ctx.state === 'suspended') await this.ctx.resume()
     this.emit()
@@ -301,6 +334,12 @@ export class Machine {
 
   stop() {
     this.setState({ playing: false })
+  }
+
+  /** 卓（EL-SYSTEMA Live）へ音を渡すための口。audio が開く前は null。 */
+  get fieldAudio(): { audio: AudioContext; master: AudioNode; analyser: AnalyserNode } | null {
+    if (!this.ctx || !this.chain) return null
+    return { audio: this.ctx, master: this.chain.master, analyser: this.chain.analyser }
   }
 
   /** Back to the top of the spiral without touching the pattern. */
@@ -326,7 +365,7 @@ export class Machine {
       this.cursorTime = Math.max(this.cursorTime, ctx.currentTime + 0.05)
       return
     }
-    const horizon = ctx.currentTime + LOOKAHEAD
+    const horizon = ctx.currentTime + (typeof document !== 'undefined' && document.hidden ? LOOKAHEAD_HIDDEN : LOOKAHEAD)
     const cfg = this.state.spiral
     let guard = 0
     while (this.cursorTime < horizon && guard++ < 64) {
@@ -437,6 +476,8 @@ export class Machine {
   dispose() {
     if (this.timer !== null) window.clearInterval(this.timer)
     this.timer = null
+    this.ticker?.stop()
+    this.ticker = null
     void this.ctx?.close()
     this.ctx = null
   }
