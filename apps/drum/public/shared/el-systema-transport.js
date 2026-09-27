@@ -17,24 +17,46 @@
 
   const DEFAULT_BC_NAME = "el-systema-field";
 
-  // 既定の中継先。
-  // ローカルの relay から配信されているページ（http://localhost:PORT/... など）は、
-  // **自分を配信しているポート**へ繋ぐ。これで 8787 が塞がっていても別ポートで一式が動き、
-  // 本番のネット環境に一切依存しない（INV-5 ローカル完結）。
-  // 公開URL（https://…github.io 等）から開かれた時だけ、従来どおり ws://localhost:8787 を狙う。
-  function defaultWsUrl() {
+  // 既定の中継先。「どこから開かれたか」で 1 本に決め打ちせず、**候補を順に試す**。
+  //   1. ?ws=host:port … 明示指定（最優先）
+  //   2. 自分を配信しているポート … relay 直下（localhost:8787/instruments/… 等）ならここで繋がる。
+  //      8787 が塞がっていても別ポートで一式が動く。
+  //   3. ws://localhost:8787 … 既定の relay。
+  // 2 が relay でない場合（vite の dev/preview サーバから開いた時など）は繋がらないので、
+  // 失敗したら次の候補へ自動で移る。これで「どのサーバから開いても最終的に場に入る」。
+  function defaultWsCandidates() {
+    var out = [];
+    try {
+      var q = new URLSearchParams(location.search).get("ws");
+      if (q) out.push(/^wss?:\/\//.test(q) ? q : "ws://" + q);
+    } catch (e) {}
     try {
       var h = location.hostname;
       var local = (h === "localhost" || h === "127.0.0.1" || h === "[::1]" || h === "::1");
-      if (local && location.port) return "ws://" + location.host;
+      // relay が配信するパス（/instruments/<id>/ ・ /hub.html の隣）なら、自分のポートが relay。
+      // そうでないローカルサーバ（vite の dev/preview 等）から開かれた時は 8787 を先に試す
+      // ＝無駄な失敗ログを出さずに場へ入る。どちらの順でも最終的には繋がる。
+      var servedByRelay = /^\/instruments\/[^/]+\//.test(location.pathname);
+      if (local && location.port) {
+        if (servedByRelay) out.push("ws://" + location.host);
+        else { out.push("ws://localhost:8787"); out.push("ws://" + location.host); }
+      }
     } catch (e) {}
-    return "ws://localhost:8787";
+    out.push("ws://localhost:8787");
+    var seen = {}, uniq = [];
+    for (var i = 0; i < out.length; i++) { if (!seen[out[i]]) { seen[out[i]] = 1; uniq.push(out[i]); } }
+    return uniq;
   }
-  const DEFAULT_WS_URL = defaultWsUrl();
+  const DEFAULT_WS_CANDIDATES = defaultWsCandidates();
+  const DEFAULT_WS_URL = DEFAULT_WS_CANDIDATES[0];
 
   // ─ WebSocket transport (案B) ───────────────────────────────────────────────
   function createWsTransport(opts) {
-    const url = (opts && opts.url) || DEFAULT_WS_URL;
+    // 明示 url が来たらそれ 1 本。無ければ候補を順に試す。
+    const candidates = (opts && opts.url) ? [opts.url] : DEFAULT_WS_CANDIDATES.slice();
+    let ci = 0;
+    let url = candidates[0];
+    let everOpened = false;
     // INV-4: 指数バックオフ 1s/2s/4s/8s（上限8s）。成功接続で 1s にリセット。
     const backoffMax = (opts && opts.backoffMax) || 8000;
     let backoff = (opts && opts.reconnectMs) || 1000;
@@ -45,14 +67,22 @@
     const onClose = [];
     const outbox = [];
 
+    // 一度も開けていない間は、閉じるたびに次の候補へ移る（relay でないサーバから開かれた場合の救済）。
+    // 一度でも開けたらその候補に留まり、以後は INV-4 のバックオフ再接続だけを行う。
+    function nextCandidate() {
+      if (everOpened || candidates.length < 2) return;
+      ci = (ci + 1) % candidates.length;
+      url = candidates[ci];
+    }
     function connect() {
       try {
         ws = new WebSocket(url);
       } catch (e) {
-        if (!closed) setTimeout(connect, reconnectMs);
+        if (!closed) { nextCandidate(); setTimeout(connect, backoff); }
         return;
       }
       ws.addEventListener("open", function () {
+        everOpened = true;
         backoff = (opts && opts.reconnectMs) || 1000;   // INV-4: 接続成功でバックオフをリセット
         // 滞留分を吐く
         while (outbox.length) {
@@ -67,7 +97,13 @@
       });
       ws.addEventListener("close", function () {
         for (let i = 0; i < onClose.length; i++) onClose[i]();
-        if (!closed) { setTimeout(connect, backoff); backoff = Math.min(backoffMax, backoff * 2); }
+        if (!closed) {
+          nextCandidate();
+          // まだ一度も繋がっていない＝候補探索中は、早めに次を試す（待たせない）
+          const wait = everOpened ? backoff : Math.min(backoff, 400);
+          setTimeout(connect, wait);
+          backoff = Math.min(backoffMax, backoff * 2);
+        }
       });
       ws.addEventListener("error", function () { /* close が来る */ });
     }
@@ -75,7 +111,8 @@
 
     return {
       kind: "ws",
-      url,
+      get url() { return url; },
+      candidates: candidates.slice(),
       send: function (m) {
         const s = JSON.stringify(m);
         if (ws && ws.readyState === 1) {
