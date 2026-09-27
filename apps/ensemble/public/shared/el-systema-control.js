@@ -46,6 +46,26 @@
 
   function clamp01(x) { return x < 0 ? 0 : (x > 1 ? 1 : x); }
 
+  // 背景タブでは setInterval が 1000ms 以上へ絞られ、kehai が途切れて卓が「切断」と誤認する。
+  // Worker のタイマーはこの絞りを受けにくいので、可能な限り Worker で刻む（失敗時は setInterval）。
+  function createTicker(ms, fn) {
+    try {
+      var src = "var t=null;onmessage=function(e){var d=e.data;if(d&&d.ms){clearInterval(t);t=setInterval(function(){postMessage(0);},d.ms);}else{clearInterval(t);t=null;}};";
+      var url = URL.createObjectURL(new Blob([src], { type: "text/javascript" }));
+      var w = new Worker(url);
+      w.onmessage = function () { fn(); };
+      w.postMessage({ ms: ms });
+      return { kind: "worker", stop: function () { try { w.postMessage(0); w.terminate(); URL.revokeObjectURL(url); } catch (e) {} } };
+    } catch (e) {
+      var h = setInterval(fn, ms);
+      return { kind: "interval", stop: function () { clearInterval(h); } };
+    }
+  }
+
+  // このページ読み込みを一意に表す印。卓はこれが変わった時だけ「新しく参加した」と判断して再同期する
+  // （時間の隙間で判断すると、背景タブの絞りのたびに再同期が走って音量を押し戻してしまう）。
+  var BOOT = Math.random().toString(36).slice(2) + "-" + Date.now().toString(36);
+
   // RMS と帯域からの kehai 推定
   function makeObserver(audioContext, outputNode, sharedAnalyser) {
     if (!audioContext || !outputNode) return null;
@@ -170,17 +190,19 @@
         everSpoke: everSpoke,
         ctx: ac ? ac.state : "none",      // 卓が「クリック待ち」を知るため（running / suspended / none）
         gesture: gestureArmed,            // 卓からの play を user gesture 待ちで保留中
+        boot: BOOT,                       // ページ読み込みの識別子（卓の再同期判定に使う）
+        hz: KEHAI_HZ,                     // 送信レート（卓が「切断」判定の猶予を決める）
         at: now,
       });
     }
 
     function startKehai() {
       if (kehaiTimer) return;
-      kehaiTimer = setInterval(tick, KEHAI_MS);
+      kehaiTimer = createTicker(KEHAI_MS, tick);
     }
     function stopKehai() {
       if (!kehaiTimer) return;
-      clearInterval(kehaiTimer);
+      kehaiTimer.stop();
       kehaiTimer = null;
     }
 
