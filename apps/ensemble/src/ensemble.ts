@@ -140,6 +140,57 @@ export class Ensemble {
     }
   }
 
+  /**
+   * Hub macros for the whole ensemble: a = ENERGY (VORTEX energy + ORBIT speed),
+   * b = ORDER↔CHAOS (VORTEX chaos + ORBIT eccentricity), c = SPACE (both reverbs);
+   * volume → master gain (v²).
+   */
+  applyMacro(name: string, value: number) {
+    const v = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0))
+    switch (name) {
+      case 'macro.a':
+        this.vortex.setState((s) => ({ flow: { ...s.flow, macros: { ...s.flow.macros, energy: v } } }))
+        this.orbit.setState({ speed: 0.08 + 0.52 * v })
+        this.setRouting({ spawnAmount: 0.3 + 0.7 * v })
+        break
+      case 'macro.b':
+        this.vortex.setState((s) => ({ flow: { ...s.flow, macros: { ...s.flow.macros, chaos: v } } }))
+        this.orbit.setState({ eccentricity: 0.85 * v })
+        break
+      case 'macro.c':
+        this.vortex.setState((s) => ({ sound: { ...s.sound, macros: { ...s.sound.macros, space: v } } }))
+        this.orbit.applyMacro('macro.c', v)
+        break
+      case 'volume':
+        this.setMix({ master: v * v })
+        break
+    }
+  }
+
+  /** Hub stop: silence both instruments and clear generated state. */
+  stopAll() {
+    this.vortex.stopAll()
+    this.orbit.clear()
+    this.host?.reset()
+  }
+
+  snapshotPreset(): Record<string, unknown> {
+    return { vortex: this.vortex.exportPreset(), orbit: { ...this.orbit.getState() }, routing: { ...this.ui.routing }, mix: { ...this.ui.mix }, global: this.host ? { ...this.host.global } : undefined }
+  }
+
+  loadPresetBundle(p: Record<string, unknown>) {
+    if (p.vortex) this.vortex.loadPreset(p.vortex)
+    if (p.orbit && typeof p.orbit === 'object') this.orbit.setState(p.orbit as Partial<ReturnType<OrbitEngine['getState']>>)
+    if (p.routing && typeof p.routing === 'object') this.setRouting(p.routing as Partial<RoutingState>)
+    if (p.mix && typeof p.mix === 'object') this.setMix(p.mix as Partial<MixState>)
+    const g = p.global as { tempo?: number; tuningId?: string; rootFrequency?: number; seed?: number } | undefined
+    if (g && this.host) {
+      if (typeof g.tempo === 'number') this.host.setTempo(g.tempo)
+      if (typeof g.tuningId === 'string') this.host.setTuning(g.tuningId, typeof g.rootFrequency === 'number' ? g.rootFrequency : this.host.global.rootFrequency)
+      if (typeof g.seed === 'number') this.host.setSeed(g.seed)
+    }
+  }
+
   diagnostics() {
     const h = this.host
     const vs = this.vortex.snapshot()

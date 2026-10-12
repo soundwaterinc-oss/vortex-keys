@@ -96,6 +96,8 @@ export class MasterChain {
   readonly buses = new Map<string, InstrumentBus>()
   readonly send: GainNode
   readonly wet: GainNode
+  /** gate on the space return (delay + reverb tail), so a stop can cut the tail */
+  readonly tail: GainNode
   readonly master: GainNode
   readonly analyser: AnalyserNode
   private levelBuf: Uint8Array<ArrayBuffer>
@@ -121,6 +123,8 @@ export class MasterChain {
     this.send.connect(conv)
     delay.connect(conv)
     conv.connect(this.wet)
+    this.tail = ctx.createGain()
+    this.wet.connect(this.tail)
 
     this.master = ctx.createGain()
     this.master.gain.value = opts.masterGain ?? 0.7
@@ -155,7 +159,7 @@ export class MasterChain {
 
     this.input.connect(this.master)
     this.input.connect(this.send)
-    this.wet.connect(this.master)
+    this.tail.connect(this.master)
     this.master.connect(lowShelf)
     lowShelf.connect(highShelf)
     highShelf.connect(sat)
@@ -177,6 +181,15 @@ export class MasterChain {
     let b = this.buses.get(name)
     if (!b) this.buses.set(name, (b = new InstrumentBus(this.ctx, name, this)))
     return b
+  }
+
+  /**
+   * Cut (true) or reopen (false) the space return. A hard stop releases the
+   * dry voices but the delay/reverb would ring on for seconds; cutting the
+   * return makes the stop land within ~0.3 s.
+   */
+  dampTail(on: boolean) {
+    this.tail.gain.setTargetAtTime(on ? 0 : 1, this.ctx.currentTime, on ? 0.06 : 0.02)
   }
 
   setMasterGain(g: number) {

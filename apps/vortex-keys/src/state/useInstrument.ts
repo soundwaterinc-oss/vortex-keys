@@ -4,6 +4,7 @@ import { Instrument } from '../engine/instrument'
 /** Standalone app instance. ENSEMBLE provides its own through InstrumentContext. */
 export const defaultInstrument = new Instrument()
 export const InstrumentContext = createContext<Instrument>(defaultInstrument)
+;(window as unknown as { __vortexInstrument: Instrument }).__vortexInstrument = defaultInstrument
 
 export function useInstrument(): Instrument {
   return useContext(InstrumentContext)

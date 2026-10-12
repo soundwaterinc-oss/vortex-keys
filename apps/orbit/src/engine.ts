@@ -285,6 +285,34 @@ export class OrbitEngine implements HostedInstrument<OrbitState> {
     return body
   }
 
+  /** Hub macros: a = density → speed, b = structure → eccentricity, c = space → reverb send; volume → bus level (v²). */
+  applyMacro(name: string, value: number) {
+    const v = clamp(Number.isFinite(value) ? value : 0, 0, 1)
+    switch (name) {
+      case 'macro.a':
+        this.setState({ speed: 0.08 + 0.52 * v })
+        break
+      case 'macro.b':
+        this.setState({ eccentricity: 0.85 * v })
+        break
+      case 'macro.c':
+        if (this.synth) this.synth.setMacros({ ...this.synth.macros, space: 0.05 + 0.85 * v })
+        break
+      case 'volume':
+        this.host?.instrumentBus(INSTRUMENT_ID).setLevel(v * v)
+        break
+    }
+  }
+
+  /** Hub play: start audio and, if the dial is empty, launch a small deterministic constellation. */
+  async playFromHub() {
+    await this.start()
+    if (!this.physics.bodies().some((b) => b.alive)) {
+      this.launch(0, 0.75)
+      this.launch(2, 0.45)
+    }
+  }
+
   clear() {
     this.flow.clear()
     this.queue.clear()

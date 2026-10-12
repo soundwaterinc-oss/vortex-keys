@@ -212,6 +212,35 @@ export class Instrument implements HostedInstrument<InstrumentState> {
     this.dispose()
   }
 
+  /**
+   * Hub macros (control-contract §4.2): a = density/energy → FLOW + ENERGY,
+   * b = timbre/structure → COLOR + ORDER↔CHAOS, c = space → SPACE (sound + flow).
+   * volume → this instrument's bus level (perceptual v²).
+   */
+  applyMacro(name: string, value: number) {
+    const v = clamp(Number.isFinite(value) ? value : 0, 0, 1)
+    switch (name) {
+      case 'macro.a':
+        this.setState((s) => ({ flow: { ...s.flow, amount: v, macros: { ...s.flow.macros, energy: v } } }))
+        break
+      case 'macro.b':
+        this.setState((s) => ({ sound: { ...s.sound, macros: { ...s.sound.macros, color: v } }, flow: { ...s.flow, macros: { ...s.flow.macros, chaos: v } } }))
+        break
+      case 'macro.c':
+        this.setState((s) => ({ sound: { ...s.sound, macros: { ...s.sound.macros, space: v } }, flow: { ...s.flow, macros: { ...s.flow.macros, space: v } } }))
+        break
+      case 'volume':
+        this.host?.instrumentBus(INSTRUMENT_ID).setLevel(v * v)
+        break
+    }
+  }
+
+  /** Hub stop: silence everything and drop generated state (the instrument stays ready). */
+  stopAll() {
+    this.clearFlow()
+    this.panic()
+  }
+
   /** Stop the scheduler and close audio (e.g. on unmount). */
   dispose() {
     if (this.timer !== null) window.clearInterval(this.timer)
